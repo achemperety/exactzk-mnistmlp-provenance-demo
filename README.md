@@ -1,0 +1,137 @@
+# exactzk-mnistmlp-provenance-demo
+
+Standalone reproduction bundle for one circuit from a larger zkML-gated
+payment escrow design: an MnistMLP classifier (52,650 params, K=8 batched
+inference lanes) compiled with [EZKL](https://github.com/zkonduit/ezkl) into
+a Halo2 verifying key that is deployed and attested on Base Sepolia. MNIST is
+a public, well-known dataset — this bundle carries no model IP beyond what
+that implies. Context on the larger design:
+[Atomic ZK-proof-gated settlement for x402 agent payments](https://ethresear.ch/t/atomic-zk-proof-gated-settlement-for-x402-agent-payments-a-measured-reference-design/25660).
+
+This repo answers one narrow question: **given only the four files below,
+can an independent party rebuild the exact same verifying key that is live
+on-chain?** Yes — verified below, twice (native + Docker).
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `model_k8.onnx` + `model_k8.onnx.data` | The ONNX model (external-data format) |
+| `settings.json` | EZKL circuit settings (already calibrated + scale-pinned — see "Calibration" below) |
+| `input.json` | A real sample input actually used to build and witness this circuit |
+| `srs.bin` | The structured reference string used for `setup()` — **see "About srs.bin" below, this is a test SRS, not a production trusted setup** |
+
+Pinned input digests (checked automatically by `verify.py` before it runs anything):
+
+```
+model_k8.onnx   sha256=5e02c0f09825aaa62d79ba93e86d7baa933150650a02c3d9307bb9afddd43c0a
+settings.json   sha256=a1d03ec48a1751397f55d6ad5888509146ba09f91764ccae5b09afd448402f4c
+srs.bin         sha256=d1a1655b4366a766d1578beb257849a92bf91cb1358c1a2c37ab180c5d3a204d
+```
+
+## Target: the deployed VK
+
+| Digest | Value | What it is |
+|---|---|---|
+| `SHA256(vk.key)` | `1ed847e127419bc1d7db2a22779f75284975bf1908b33a43486ca9070e4ef627` | Raw artifact hash of the Halo2 verifying key file |
+| `keccak256(vk.key)` | `dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | The `vkHash` actually submitted on-chain (Base Sepolia, chainId 84532) via this project's ERC-8004-style passport attestation |
+
+`verify.py` reproduces `vk.key` from scratch and checks it against **both** values.
+
+## Exact EZKL version
+
+**`ezkl==23.0.5`** (Python package, from PyPI). This is the exact version
+that produced the deployed VK above, confirmed via `ezkl.__version__` in the
+environment that ran `compile_circuit` + `setup` for this artifact set.
+Different EZKL versions can produce different VKs from identical
+model/settings/SRS inputs, so this pin is load-bearing, not decorative — use
+it, don't just use "latest."
+
+## Reproduce — exact commands
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install ezkl==23.0.5 eth-utils==6.0.0 pycryptodome==3.20.0
+python3 verify.py
+```
+
+`verify.py` runs `ezkl.compile_circuit()` then `ezkl.setup()` (no
+GPU required; expect ~15–100s and a peak RSS of roughly 7–8 GB depending on
+host — this matches the memory profile already documented for this circuit
+in the parent project). It writes a ~5.2 GB `pk.key` to a temp directory
+(deleted on exit) as a byproduct of `setup()` — that's normal, `pk.key` is
+not itself part of what's being verified here.
+
+## Reproduce — Docker (no local toolchain dependency)
+
+```bash
+docker build -t mnistmlp-repro .
+docker run --rm mnistmlp-repro
+```
+
+The `Dockerfile` pins `ezkl==23.0.5`, `eth-utils==6.0.0`, and
+`pycryptodome==3.20.0` (the keccak256 backend `eth-utils` needs) explicitly, so
+this path doesn't depend on your local Python/pip resolving the same
+versions "by luck." It also pins `--platform=linux/amd64`, because
+`ezkl==23.0.5` ships a `manylinux2014_x86_64` wheel on PyPI but no
+`linux/aarch64` wheel for this version — on an Apple Silicon Docker host
+this runs under emulation (works, just slower to build/pull than native).
+Allow the container at least ~8 GB of memory (Docker Desktop's default
+resource limits are usually sufficient on modern machines; increase if
+`setup()` gets OOM-killed).
+
+## Calibration inputs
+
+EZKL's settings-generation step for this circuit
+(`ezkl.calibrate_settings(input_json, onnx_path, settings_path,
+target="resources")`) was run against **the same input tensor that ships
+here as `input.json`** — there is no separate calibration dataset. The
+committed `settings.json` already reflects that calibration (plus a
+subsequent scale-pinning step), so reproducers don't need to re-run
+calibration at all: `verify.py` consumes `settings.json` directly and never
+calls `calibrate_settings`. Stating this explicitly so it isn't left
+ambiguous: **`input.json` covers the calibration-input requirement — no
+additional file or seed is needed.**
+
+## About `srs.bin`
+
+This is a **locally-generated, cryptographically insecure test SRS**
+(`ezkl.gen_srs()`), not output from a real trusted-setup ceremony. It is
+included here — rather than regenerated — because `ezkl.gen_srs()` is
+**non-deterministic** (it samples fresh toxic waste per SRS): regenerating
+it locally produces a different SRS, and therefore a different VK, than the
+one deployed on-chain. Shipping this exact file is the only way this bundle
+round-trips to the deployed VK.
+
+**This is a known, temporary state of the underlying project, not a
+security claim about it.** A production/mainnet deployment of the design
+this circuit belongs to requires a universal SRS from a real trusted-setup
+ceremony (e.g. Perpetual Powers of Tau), not this file. Do not reuse
+`srs.bin` for anything where soundness matters.
+
+## Attestation format
+
+If you reproduce this and want to let us know, here's the shape we'd
+appreciate back — plain JSON, no signature required for this bounded test:
+
+```json
+{
+  "reproducer": "<name/org/identity>",
+  "date": "<ISO8601>",
+  "ezkl_version": "<version used>",
+  "computed_vk_digest": "<hex>",
+  "matches_expected_digest": true,
+  "notes": "<optional>"
+}
+```
+
+`verify.py` prints one of these (with `computed_vk_digest` as the
+`SHA256(vk.key)` value) at the end of a successful or failed run — copy it
+as-is, or adapt it.
+
+## Scope
+
+This bundle only proves circuit-provenance reproducibility (same
+inputs → same VK). It is not the full escrow contract, not the proving
+pipeline benchmarks, and not the passport/attestation contract code — those
+live in the private project this was extracted from.
