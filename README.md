@@ -31,6 +31,22 @@ input.json           sha256=be04b0e63b1ab3ed5b4d030a9d41f5ee1d79033d60a5740dd49d
 srs.bin              sha256=d1a1655b4366a766d1578beb257849a92bf91cb1358c1a2c37ab180c5d3a204d
 ```
 
+The same five digests, in standard `sha256sum`-compatible format, are also
+committed as [`MANIFEST.sha256`](MANIFEST.sha256) — a convenience pointer,
+not a separate verification mechanism (`verify.py`'s per-file checks above
+remain the actual source of truth). You can check the working tree against
+it directly:
+
+```bash
+shasum -a 256 -c MANIFEST.sha256
+```
+
+`MANIFEST.sha256` itself has this "bundle digest" (`SHA256(MANIFEST.sha256)`):
+
+```
+dfe064d623512a83f72c16e121a7c2e44e92d453fce49afe819ee363990f11da
+```
+
 ## Target: the deployed VK
 
 | Digest | Value | What it is |
