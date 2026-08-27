@@ -24,9 +24,11 @@ on-chain?** Yes — verified below, twice (native + Docker).
 Pinned input digests (checked automatically by `verify.py` before it runs anything):
 
 ```
-model_k8.onnx   sha256=5e02c0f09825aaa62d79ba93e86d7baa933150650a02c3d9307bb9afddd43c0a
-settings.json   sha256=a1d03ec48a1751397f55d6ad5888509146ba09f91764ccae5b09afd448402f4c
-srs.bin         sha256=d1a1655b4366a766d1578beb257849a92bf91cb1358c1a2c37ab180c5d3a204d
+model_k8.onnx        sha256=5e02c0f09825aaa62d79ba93e86d7baa933150650a02c3d9307bb9afddd43c0a
+model_k8.onnx.data   sha256=b96f93301048ea7af8eeaca094fee834111a4c1a3a639f17fb5f61b0b13a2612
+settings.json        sha256=a1d03ec48a1751397f55d6ad5888509146ba09f91764ccae5b09afd448402f4c
+input.json           sha256=be04b0e63b1ab3ed5b4d030a9d41f5ee1d79033d60a5740dd49d478560c98f7c
+srs.bin              sha256=d1a1655b4366a766d1578beb257849a92bf91cb1358c1a2c37ab180c5d3a204d
 ```
 
 ## Target: the deployed VK
