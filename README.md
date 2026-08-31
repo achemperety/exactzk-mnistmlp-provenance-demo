@@ -168,11 +168,23 @@ appreciate back — plain JSON, no signature required for this bounded test:
   "reproducer": "<name/org/identity>",
   "date": "<ISO8601>",
   "ezkl_version": "<version used>",
-  "computed_vk_digest": "<hex>",
-  "matches_expected_digest": true,
+  "verification_scope": "partial" | "full",
+  "computed_vk_digest": "<hex, or null if scope is partial and VK step wasn't reached>",
+  "matches_expected_digest": true | false | null,
   "notes": "<optional>"
 }
 ```
+
+`verification_scope` records what was actually established at attestation
+time: `"partial"` means only the pinned artifact hashes were checked (the
+resolution step in the [section above](#identity-locator-and-resolution--kept-separate-on-purpose));
+`"full"` means VK reproduction was completed and compared against the
+expected digest. This is a **historical fact about that reproduction run**,
+not a live status — once recorded, it must never be silently upgraded (e.g.
+`"partial"` → `"full"`) or downgraded later, including in response to
+changes in current dependency resolvability. That's a separate concern,
+already covered above: an attestation's scope describes what its reproducer
+did at the time, independent of whether the same steps are resolvable today.
 
 `verify.py` prints one of these (with `computed_vk_digest` as the
 `SHA256(vk.key)` value) at the end of a successful or failed run — copy it
