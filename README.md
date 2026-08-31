@@ -47,6 +47,37 @@ shasum -a 256 -c MANIFEST.sha256
 dfe064d623512a83f72c16e121a7c2e44e92d453fce49afe819ee363990f11da
 ```
 
+## Identity, locator, and resolution — kept separate on purpose
+
+Worth being explicit about three things this bundle conflates implicitly if
+you don't read `verify.py` closely:
+
+- **Committed identity.** The SHA256 hashes pinned above (and in
+  `verify.py`) *are* the dependency identity for each of the five input
+  files. That digest is the authority — not this repo, not GitHub, not any
+  particular file host.
+- **Locator.** This GitHub repo is *one place* to currently fetch bytes
+  matching that identity — a convenience locator, not the identity itself.
+  If this repo ever becomes unavailable, any source producing bytes that
+  hash-match the committed digests above is equally valid; nothing about
+  the identity depends on GitHub specifically.
+- **Resolution.** The pinned-digest check already at the top of
+  `verify.py` *is* the resolution step: fetch bytes from wherever, hash
+  them, compare against the committed digest, and only then use them. That
+  mechanism doesn't need to change to support fetching from a different
+  locator — it already treats "bytes matching this hash" as sufficient
+  regardless of source.
+
+**Fail-closed condition:** if bytes matching a committed identity above
+cannot currently be resolved from *any* source, the attestation becomes
+currently unestablishable for a new reproducer — full stop, not a partial
+result. That is distinct from, and does not retroactively invalidate, an
+earlier confirmed reproduction (e.g. a prior partial reproduction someone
+already completed and reported). Historical confirmation and current
+recomputability are separate facts about different points in time; this
+README does not collapse them into one status line, and neither should you
+when citing this bundle.
+
 ## Target: the deployed VK
 
 | Digest | Value | What it is |
