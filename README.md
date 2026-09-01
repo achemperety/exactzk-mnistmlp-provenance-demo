@@ -169,7 +169,10 @@ appreciate back — plain JSON, no signature required for this bounded test:
   "date": "<ISO8601>",
   "ezkl_version": "<version used>",
   "verification_scope": "partial" | "full",
-  "computed_vk_digest": "<hex, or null if scope is partial and VK step wasn't reached>",
+  "computed_vk_digest": {
+    "sha256": "<hex, or null if scope is partial and VK step wasn't reached>",
+    "keccak256": "<hex, or null if scope is partial and VK step wasn't reached>"
+  },
   "matches_expected_digest": true | false | null,
   "notes": "<optional>"
 }
@@ -186,9 +189,18 @@ changes in current dependency resolvability. That's a separate concern,
 already covered above: an attestation's scope describes what its reproducer
 did at the time, independent of whether the same steps are resolvable today.
 
-`verify.py` prints one of these (with `computed_vk_digest` as the
-`SHA256(vk.key)` value) at the end of a successful or failed run — copy it
-as-is, or adapt it.
+`verify.py` prints a suggested attestation at the end of a successful or
+failed run — copy it as-is, or adapt it. Note: as of the current script,
+its printed `computed_vk_digest` is still the single `SHA256(vk.key)`
+string, even though the script separately computes and checks
+`keccak256(vk.key)` too — the script hasn't been updated to emit the
+`{sha256, keccak256}` object shape above yet. Fill in `keccak256` by hand
+(it's printed separately as `computed vk.key keccak256 = ...`) until that's
+fixed.
+
+## Independent Reproductions
+
+1 of the target 3-5 independent reproductions confirmed. See `attestations/` for records.
 
 ## Scope
 

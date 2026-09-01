@@ -1,0 +1,31 @@
+{
+  "type": "IndependentReproductionAttestation",
+  "version": "1",
+  "domain": "exactzk.independent-reproduction-attestation.v1",
+  "repository": "https://github.com/achemperety/exactzk-mnistmlp-provenance-demo",
+  "bundleRevision": "54637f58522169deff89f03bfaa4bb765ff92eca",
+  "ezklVersion": "23.0.5",
+  "reproducedDigests": {
+    "sha256": "1ed847e127419bc1d7db2a22779f75284975bf1908b33a43486ca9070e4ef627",
+    "keccak256": "dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f"
+  },
+  "matchesExpected": true,
+  "reproductionDate": "2026-08-31",
+  "issuedAt": "2026-09-01T08:30:37.448Z",
+  "reproducer": {
+    "name": "Maha Strategies LLC (Mayone Rajan)",
+    "did": "did:key:zQ3shMymYG2u2NQqbPH9xLLSzo2FT5iqDoyqUbvtX8nJ9FY9T",
+    "verificationMethod": "did:key:zQ3shMymYG2u2NQqbPH9xLLSzo2FT5iqDoyqUbvtX8nJ9FY9T#zQ3shMymYG2u2NQqbPH9xLLSzo2FT5iqDoyqUbvtX8nJ9FY9T"
+  },
+  "scope": "Independent circuit-provenance reproduction only; does not validate the full escrow system or the test SRS for production use. Observed memory requirement ~7GB, matching documented requirement.",
+  "purpose": "attestation-of-independent-vk-reproduction",
+  "proof": {
+    "type": "JsonWebSignature2020",
+    "created": "2026-09-01T08:30:37.448Z",
+    "verificationMethod": "did:key:zQ3shMymYG2u2NQqbPH9xLLSzo2FT5iqDoyqUbvtX8nJ9FY9T#zQ3shMymYG2u2NQqbPH9xLLSzo2FT5iqDoyqUbvtX8nJ9FY9T",
+    "proofPurpose": "assertionMethod",
+    "canonicalization": "RFC8785",
+    "domain": "exactzk.independent-reproduction-attestation.v1",
+    "jws": "eyJhbGciOiJFUzI1NksiLCJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdfQ..fdSEEXM39lTXT50drgyTVYVR2fuzqYDp8sXodXrBK4o9TD6kyY3WoMElCzsFCYxdNZy0N0ROgxHpcBhsfuCNDg"
+  }
+}
