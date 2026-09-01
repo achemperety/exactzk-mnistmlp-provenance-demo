@@ -87,7 +87,11 @@ def main() -> int:
         "reproducer": os.environ.get("REPRODUCER_ID", "<fill in: name/org/identity>"),
         "date": None,
         "ezkl_version": ezkl.__version__,
-        "computed_vk_digest": vk_sha256,
+        "verification_scope": "full",
+        "computed_vk_digest": {
+            "sha256": vk_sha256,
+            "keccak256": vk_keccak256,
+        },
         "matches_expected_digest": ok,
         "notes": "",
     }

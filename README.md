@@ -190,13 +190,8 @@ already covered above: an attestation's scope describes what its reproducer
 did at the time, independent of whether the same steps are resolvable today.
 
 `verify.py` prints a suggested attestation at the end of a successful or
-failed run — copy it as-is, or adapt it. Note: as of the current script,
-its printed `computed_vk_digest` is still the single `SHA256(vk.key)`
-string, even though the script separately computes and checks
-`keccak256(vk.key)` too — the script hasn't been updated to emit the
-`{sha256, keccak256}` object shape above yet. Fill in `keccak256` by hand
-(it's printed separately as `computed vk.key keccak256 = ...`) until that's
-fixed.
+failed run, with `computed_vk_digest` already in the `{sha256, keccak256}`
+object shape above — copy it as-is, or adapt it.
 
 ## Independent Reproductions
 
