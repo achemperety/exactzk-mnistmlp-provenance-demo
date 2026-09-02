@@ -193,6 +193,39 @@ did at the time, independent of whether the same steps are resolvable today.
 failed run, with `computed_vk_digest` already in the `{sha256, keccak256}`
 object shape above — copy it as-is, or adapt it.
 
+### Verifying a signed attestation's `proof.jws`
+
+Confirmed attestations under `attestations/` (see
+[`001-maha-strategies-2026-08-31.json`](attestations/001-maha-strategies-2026-08-31.json)
+for an example) carry a `JsonWebSignature2020` proof over the attestation
+document, canonicalized per RFC 8785 (JCS) with a detached, unencoded
+payload (`b64: false` in the JWS header). Reconstructing the exact bytes
+that `proof.jws` signs is not obvious from the JWS spec alone and is easy
+to get wrong. The construction, step by step:
+
+1. Take the full attestation JSON document (the top-level object, including
+   `type`, `domain`, `reproducer`, `proof`, etc.).
+2. Delete the **entire `proof` key** from that document — not just its
+   `jws` field, and not `jws` set to `null` or `""`. The whole `proof`
+   object (`type`, `created`, `verificationMethod`, `proofPurpose`,
+   `canonicalization`, `domain`, and `jws` together) must be absent from
+   the document you canonicalize.
+3. Canonicalize the resulting document with RFC 8785 (JSON Canonicalization
+   Scheme).
+4. That canonical JSON, as raw bytes, is the JWS payload. Because the JWS
+   header sets `b64: false` with `"crit": ["b64"]`, the signing input is
+   `<base64url(header)> + "." + <payload bytes>` — the payload is **not**
+   base64url-encoded before signing, per RFC 7797.
+5. Verify `proof.jws` against that signing input using the public key
+   resolved from `proof.verificationMethod` (a `did:key` DID here).
+
+Only this exact construction — full `proof` key removed, RFC 8785
+canonicalization, raw (non-base64url) detached payload — produces a valid
+signature check. Plausible-looking variants (stripping only `jws` while
+leaving the rest of `proof` in place, or zeroing out `jws` instead of
+deleting the key) all canonicalize to different bytes and will fail
+verification even though the signature itself is valid.
+
 ## Independent Reproductions
 
 1 of the target 3-5 independent reproductions confirmed. See `attestations/` for records.
