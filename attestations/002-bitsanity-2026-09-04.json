@@ -1,0 +1,31 @@
+{
+  "type": "IndependentReproductionAttestation",
+  "version": "1",
+  "domain": "exactzk.independent-reproduction-attestation.v1",
+  "repository": "https://github.com/achemperety/exactzk-mnistmlp-provenance-demo",
+  "bundleRevision": "54637f58522169deff89f03bfaa4bb765ff92eca",
+  "ezklVersion": "23.0.5",
+  "reproducedDigests": {
+    "sha256": "1ed847e127419bc1d7db2a22779f75284975bf1908b33a43486ca9070e4ef627",
+    "keccak256": "dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f"
+  },
+  "matchesExpected": true,
+  "reproductionDate": "2026-09-04",
+  "issuedAt": "2026-09-04T21:45:40.892899Z",
+  "reproducer": {
+    "name": "Bryan Woods https://github.com/bitsanity",
+    "did": "did:key:zQ3shMsRCrFfDZpnYCZ9zztU6P3uZKLKCrP2cpT8KnwZpPukn",
+    "verificationMethod": "did:key:zQ3shMsRCrFfDZpnYCZ9zztU6P3uZKLKCrP2cpT8KnwZpPukn#zQ3shMsRCrFfDZpnYCZ9zztU6P3uZKLKCrP2cpT8KnwZpPukn"
+  },
+  "scope": "Independent circuit-provenance reproduction only; does not validate the full escrow system or the test SRS for production use. Native run on Python 3.11.16 + ezkl 23.0.5 (not Docker). Observed memory requirement ~7-8 GB RSS, matching documented requirement.",
+  "purpose": "attestation-of-independent-vk-reproduction",
+  "proof": {
+    "type": "JsonWebSignature2020",
+    "created": "2026-09-04T21:45:40.892899Z",
+    "verificationMethod": "did:key:zQ3shMsRCrFfDZpnYCZ9zztU6P3uZKLKCrP2cpT8KnwZpPukn#zQ3shMsRCrFfDZpnYCZ9zztU6P3uZKLKCrP2cpT8KnwZpPukn",
+    "proofPurpose": "assertionMethod",
+    "canonicalization": "RFC8785",
+    "domain": "exactzk.independent-reproduction-attestation.v1",
+    "jws": "eyJhbGciOiJFUzI1NksiLCJiNjQiOmZhbHNlLCJjcml0IjpbImI2NCJdLCJ0eXAiOiJKV1QifQ..oTSsyV1g6xnCNyGNiQoKWgTynYygmUVu6mXDEiIRdFJlJwAwCg540SFWfmqvXTshkcIJUsJ2y2hJL3aW6nhmgg"
+  }
+}

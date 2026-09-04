@@ -228,7 +228,7 @@ verification even though the signature itself is valid.
 
 ## Independent Reproductions
 
-1 of the target 3-5 independent reproductions confirmed. See `attestations/` for records.
+2 of the target 3-5 independent reproductions confirmed. See `attestations/` for records.
 
 ## Scope
 
