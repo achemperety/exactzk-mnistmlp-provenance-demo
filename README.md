@@ -228,7 +228,7 @@ verification even though the signature itself is valid.
 
 ## Independent Reproductions
 
-2 of the target 3-5 independent reproductions confirmed. See `attestations/` for records.
+3 of the target 3-5 independent reproductions confirmed — Stage 1 minimum threshold met. See `attestations/` for records.
 
 ## Scope
 

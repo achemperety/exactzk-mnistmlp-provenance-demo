@@ -1,0 +1,12 @@
+{
+  "reproducer": "nsgoods (nsgoods.org)",
+  "date": "2026-09-07T14:47:43+00:00",
+  "ezkl_version": "23.0.5",
+  "verification_scope": "full",
+  "computed_vk_digest": {
+    "sha256": "1ed847e127419bc1d7db2a22779f75284975bf1908b33a43486ca9070e4ef627",
+    "keccak256": "dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f"
+  },
+  "matches_expected_digest": true,
+  "notes": "Disposable 8c/16GB host, Docker build then run with --network none. Pre-run sha256 of the three pinned inputs matched the README. Both digests match the deployed Base Sepolia (84532) vkHash. Build 16s, full verify run 45s, peak host memory ~8.4GB."
+}
