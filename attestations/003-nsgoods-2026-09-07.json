@@ -8,5 +8,13 @@
     "keccak256": "dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f"
   },
   "matches_expected_digest": true,
-  "notes": "Disposable 8c/16GB host, Docker build then run with --network none. Pre-run sha256 of the three pinned inputs matched the README. Both digests match the deployed Base Sepolia (84532) vkHash. Build 16s, full verify run 45s, peak host memory ~8.4GB."
+  "notes": "Disposable 8c/16GB host, Docker build then run with --network none. Pre-run sha256 of the three pinned inputs matched the README. Both digests match the deployed Base Sepolia (84532) vkHash. Build 16s, full verify run 45s, peak host memory ~8.4GB.",
+  "proof": {
+    "type": "EthereumEip191Signature",
+    "canonicalization": "RFC8785",
+    "signingScheme": "EIP-191 personal_sign: keccak256(\"\\x19Ethereum Signed Message:\\n\" + \"592\" + <RFC8785 canonical bytes>)",
+    "signerAddress": "0x57fF0F084Cba33e6761503f90eEF0Da9F159350c",
+    "signerAuthorityManifest": "https://x402.nsgoods.org/proof/index.json",
+    "signature": "0x272e5cd55007f4134ca845356101b9b38037ec45b46d2a48805f34cea7f77e7436673a890982727eb123bb64ec841296f4e0b8d8daef522c83cef038fc5f23fb1b"
+  }
 }
