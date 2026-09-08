@@ -103,7 +103,7 @@ different questions:
 
 | Identifier | Formula | What it establishes |
 |---|---|---|
-| `vkHash_file` | `keccak256(vk.key)` = `dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | That an independent party, given the five files in this repo, can reproduce the exact same `vk.key` this project's on-chain passport attestation is keyed on. **This is what `verify.py` checks, and what all three records in `attestations/` attest to.** |
+| `vkHash_file` | `keccak256(vk.key)` = `dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | That an independent party, given the five files in this repo, can reproduce the exact same `vk.key` this project's on-chain passport attestation is keyed on. **This is what `verify.py` checks, and what all four records in `attestations/` attest to — `004` reports it alongside `vkHash_bytecode` since reproducing the bytecode link required regenerating `vk.key` first.** |
 | `vkHash_bytecode` | `keccak256(stripCborMetadata(eth_getCode(deployedVerifier)))` = `d0cab4041caaf77ea95fe45a29d14950be503ce26eb982af11026634112d8c67` | That the compiled, deployed Solidity verifier contract's runtime bytecode matches what `vk.key` (plus a pinned EZKL + solc toolchain) produces. This is a **separate, additionally-verifiable** link, not implied by a `vk.key` reproduction alone. **This is what `verify_deployment.py` checks.** |
 
 The full chain, one digest per link:
@@ -115,20 +115,31 @@ model weights --[tier 1]--> vk.key --[tier 2]--> Halo2Verifier.sol --[tier 2]-->
 
 | Link | Reproduced by | Cost | What it does / does not establish |
 |---|---|---|---|
-| **Tier 1** — published artifacts → `vk.key` | Anyone who runs `compile_circuit`+`setup` from the five files in this repo (`verify.py`). Requires the weights-derived ONNX files. | ~15–100s, ~7–8 GB peak RSS (measured, varies by host) | Establishes that `vk.key` — and therefore the `vkHash_file` this project's passport attestation is keyed on — really does come from this published bundle. Says nothing on its own about what contract is actually deployed on-chain. **Independently confirmed 3 times** — see `attestations/`. |
-| **Tier 2** — `vk.key` → `Halo2Verifier.sol` → deployed bytecode | Anyone with `vk.key` + `settings.json` + `srs.bin` — **no weights, no ONNX file, ever** (`verify_deployment.py`). | **MEASURED, this session, Apple Silicon macOS host, native (no Docker):** `create_evm_verifier()` 0.230s + `deploy_evm()` (solc compile + broadcast + mine, local Anvil) 0.079s ≈ **0.31s total**. The parent project's own measurement of this same step, on the same Apple Silicon M4 Pro, came in at ~0.28s — the ~10% spread between the two runs is ordinary run-to-run variance on one machine, not independent cross-host confirmation. No measurement on a different host exists yet. Three fixed input files, exactly (`inspect.signature(ezkl.create_evm_verifier)` takes no ONNX or weights path). | Establishes that the runtime bytecode actually deployed at a given address is what `vk.key` compiles and deploys to, under EZKL `23.0.5`'s codegen and whatever solc version it selects internally (not independently pinned by this project). Says nothing about whether `vk.key` itself was honestly derived from real weights — that's tier 1's job. |
+| **Tier 1** — published artifacts → `vk.key` | Anyone who runs `compile_circuit`+`setup` from the five files in this repo (`verify.py`). Requires the weights-derived ONNX files. | ~15–100s, ~7–8 GB peak RSS (measured, varies by host) | Establishes that `vk.key` — and therefore the `vkHash_file` this project's passport attestation is keyed on — really does come from this published bundle. Says nothing on its own about what contract is actually deployed on-chain. **Independently confirmed 3 times** (`001`, `002`, `003`) — see `attestations/`, which also now holds tier 2's first independent confirmation (`004`; tier 1 vs. tier 2 scope is stated per file, not assumed from the directory — see "What tier 2 does..." below). |
+| **Tier 2** — `vk.key` → `Halo2Verifier.sol` → deployed bytecode | Anyone with `vk.key` + `settings.json` + `srs.bin` — **no weights, no ONNX file, ever** (`verify_deployment.py`). | **MEASURED, this session, Apple Silicon macOS host, native (no Docker):** `create_evm_verifier()` 0.230s + `deploy_evm()` (solc compile + broadcast + mine, local Anvil) 0.079s ≈ **0.31s total**. The parent project's own measurement of this same step, on the same Apple Silicon M4 Pro, came in at ~0.28s — the ~10% spread between the two runs is ordinary run-to-run variance on one machine, not independent cross-host confirmation. A **cross-host reproduction** (not a timing benchmark — `004`'s notes report no seconds figure) now exists: `attestations/004-nsgoods-2026-09-08.json`, a disposable 8-core/16GB host with a fresh EZKL install, independent of the machine this 0.31s/0.28s comparison was measured on. No cross-host **timing** measurement has been published yet. Three fixed input files, exactly (`inspect.signature(ezkl.create_evm_verifier)` takes no ONNX or weights path). | Establishes that the runtime bytecode actually deployed at a given address is what `vk.key` compiles and deploys to, under EZKL `23.0.5`'s codegen and whatever solc version it selects internally (not independently pinned by this project). Says nothing about whether `vk.key` itself was honestly derived from real weights — that's tier 1's job. |
 
-**What tier 2 does *not* currently have that tier 1 does: third-party
-attestation.** All three records under `attestations/` are tier-1
-attestations only — a reproducer ran `compile_circuit`+`setup` and confirmed
-`vkHash_file`. **Nobody but this repo's own maintainer has yet independently
-run tier 2** and signed a record saying so. `verify_deployment.py` makes
-that reproducible by anyone with EZKL and a local chain (see its own
-docstring for exact dependencies) — it is not, today, additionally
-corroborated by a third party the way tier 1 is. Running it yourself and
-confirming `MATCH: True` against both the published digest and live
-`eth_getCode` is currently the only way to check the second link — there is
-no attestation file to take on trust for it yet.
+**Tier 2 now has one third-party attestation; tier 1 still has more.**
+`attestations/001`–`003` are tier-1 attestations — a reproducer ran
+`compile_circuit`+`setup` and confirmed `vkHash_file`. Until 2026-09-08, no
+one but this repo's own maintainer had independently run tier 2 and signed a
+record saying so; `attestations/004-nsgoods-2026-09-08.json` changes that.
+nsgoods regenerated `vk.key` offline in a network-isolated container
+(`--network none`) — rebuilding the chain from the published bundle rather
+than taking `vk.key` on trust — then ran their own `create_evm_verifier` +
+local `anvil`-deploy pipeline (their own driver, not this repo's
+`verify_deployment.py`) and compared the resulting stripped bytecode hash
+against live `eth_getCode` at
+`0x886b1baceB0552B2A4159663879b2841F3d81739` on Base Sepolia. Their reported
+digests (`vkHash_file`, `vkHash_bytecode`, `halo2verifier_sol_sha256`) match
+this repo's expected values, and their notes describe reaching that result
+before ever touching this repo's own checking script — so the agreement is
+independent corroboration, not an artifact of running the maintainer's code
+and trusting its output. Tier 1 still has more independent corroboration
+(three records) than tier 2 (one record); that gap is real, just narrower
+than before. `verify_deployment.py` remains available for anyone who wants
+to check the second link themselves rather than rely on `004` — see
+"Verifying a signed attestation's proof" below for how `004`'s signature was
+checked.
 
 The verifier contract you can check this against is a pure verifier — no
 state writes, no funds, no owner, no admin surface — at
@@ -311,18 +322,19 @@ object shape above — copy it as-is, or adapt it.
 
 ### Verifying a signed attestation's proof
 
-Confirmed attestations under `attestations/` use **one of two** proof
-schemes, not one:
+Confirmed attestations under `attestations/` use **one of three** proof
+constructions, not one:
 
-| File | `proof.type` | Scheme |
+| File | Construction | Scheme |
 |---|---|---|
-| [`001-maha-strategies-2026-08-31.json`](attestations/001-maha-strategies-2026-08-31.json), [`002-bitsanity-2026-09-04.json`](attestations/002-bitsanity-2026-09-04.json) | `JsonWebSignature2020` | JWS over RFC 8785 (JCS) canonical bytes, `did:key` signer |
-| [`003-nsgoods-2026-09-07.json`](attestations/003-nsgoods-2026-09-07.json) | `EthereumEip191Signature` | EIP-191 `personal_sign` over RFC 8785 (JCS) canonical bytes, Ethereum-address signer |
+| [`001-maha-strategies-2026-08-31.json`](attestations/001-maha-strategies-2026-08-31.json), [`002-bitsanity-2026-09-04.json`](attestations/002-bitsanity-2026-09-04.json) | `proof.type: JsonWebSignature2020` | JWS over RFC 8785 (JCS) canonical bytes, `did:key` signer |
+| [`003-nsgoods-2026-09-07.json`](attestations/003-nsgoods-2026-09-07.json) | `proof.type: EthereumEip191Signature`, embedded `proof` object | EIP-191 `personal_sign` over RFC 8785 (JCS) canonical bytes with the whole `proof` key removed, Ethereum-address signer |
+| [`004-nsgoods-2026-09-08.json`](attestations/004-nsgoods-2026-09-08.json) | No `proof` object — `payload` is a top-level sibling of `signature`/`jcs_sha256`/`jcs_len`/`signed_by`/`scheme` | EIP-191 `personal_sign` over RFC 8785 (JCS) canonical bytes of the `payload` sub-object *only*, Ethereum-address signer |
 
-Both constructions are hard to get right from the spec alone; both are
-given in full below, plus — for the EIP-191 case only — a separate,
-required check of whether the signing key was actually *authorized* to
-make this kind of statement.
+All three constructions are hard to get right from the spec alone; all
+three are given in full below, plus — for the EIP-191 cases (`003`, `004`)
+only — a separate, required check of whether the signing key was actually
+*authorized* to make this kind of statement.
 
 #### `JsonWebSignature2020` (001, 002)
 
@@ -442,28 +454,104 @@ fail closed, same as a signature mismatch.** A reader relying on a
 `signerAddress` should pin it from the manifest rather than trust it on
 first sight, per that same policy.
 
-#### No verification script in this repo covers either proof scheme
+#### EIP-191 payload envelope (004)
 
-Neither `verify.py` nor `verify_deployment.py` reads `attestations/*.json`
-or checks a `proof` of either kind — `verify.py` only *prints a suggested*
-(unsigned) attestation for a fresh run, and `verify_deployment.py` covers
-the separate tier-2 bytecode link, not attestation signatures. So there is
-no existing script that "errors on 003" — there is no code path that
-touches either proof scheme today; both constructions above are currently
-manual-only. Extending `verify.py` (or a new `verify_attestations.py`) to
-check both would need: a JCS/RFC 8785 canonicalizer (a plain
+`004`'s shape differs from both prior constructions in one structural way:
+there is no `proof` object at all. The top-level document is a flat
+envelope:
+
+- `payload` — the actual attestation content (`reproducer`, `date`,
+  `ezkl_version`, `verification_scope`, `tag`, `vkHash_file`,
+  `vkHash_bytecode`, `halo2verifier_sol_sha256`, `checked_against`,
+  `matches_expected`, `notes`), nested one level under the `payload` key.
+- `jcs_sha256`, `jcs_len` — the canonical-byte digest and length of
+  `payload` *alone*, published so a verifier can sanity-check their own
+  canonicalization before touching the signature at all.
+- `signature`, `signed_by` — the EIP-191 signature and the address it
+  claims to recover to.
+- `scheme` — a human-readable description of the construction.
+
+`scheme` reads: "...over the RFC8785/JCS canonicalization of
+`attestations/004-nsgoods-2026-09-08.json`" — read literally, that names
+the *whole file* as the canonicalization target. That reading cannot be
+what's actually signed: the file contains `signature` itself, so
+canonicalizing "the whole file" to check a signature embedded in that same
+file is circular by construction — there is no consistent set of bytes that
+is simultaneously "the file" and "what the file's signature covers" without
+first deciding what to exclude, which the sentence never says. The only
+non-circular reading is that `scheme` is naming the *attestation this file
+represents* colloquially by its filename, and the actual signing input is
+the `payload` sub-object — which sits beside the signature rather than
+containing it, so (unlike `003`) there is no key to delete from a larger
+document first: `payload` is taken as-is.
+
+Executed and confirmed for this task (2026-09-09), against the committed
+`attestations/004-nsgoods-2026-09-08.json`: canonicalizing only the
+`payload` sub-object with RFC 8785 (JCS) produces exactly **1160 bytes**,
+matching the document's own declared `jcs_len` exactly; the SHA-256 of
+those bytes is `eb3ed181802b2e69532e5393e097177f57f11253c8b77d61aef9797c7c310e54`,
+matching the declared `jcs_sha256` exactly. Applying the EIP-191
+`personal_sign` prefix to those 1160 bytes
+(`keccak256("\x19Ethereum Signed Message:\n1160" + canonical_bytes)`,
+decimal ASCII length as in `003`, not a binary-encoded integer) and
+recovering the signer from `signature` yields
+`0x57fF0F084Cba33e6761503f90eEF0Da9F159350c`, which matches `signed_by`
+exactly. The signature is valid.
+
+Three near-miss readings were checked and none recover the right address:
+canonicalizing the whole envelope with only `signature` removed (still
+includes `jcs_sha256`, `jcs_len`, `signed_by`, `scheme` as siblings —
+fields *about* the signature, not part of what it covers, since they're
+outside `payload`) recovers a different address entirely; signing the hex
+`jcs_sha256` string as ASCII text instead of the raw canonical bytes it's a
+digest of recovers a different address; and signing the raw 32-byte SHA-256
+digest bytes of `payload`'s canonicalization, instead of those canonical
+bytes themselves, also recovers a different address. Only "canonicalize
+`payload` alone, apply EIP-191 directly to those bytes" is correct.
+
+**The authority check, same as `003`:** fetched for this task (manifest
+`generated_at` at fetch time: `2026-09-08T20:21:26.254895+00:00` — again,
+this document is regenerated in place, so a later fetch may show a
+different timestamp): `signers["0x57fF0F084Cba33e6761503f90eEF0Da9F159350c"]`
+in `https://x402.nsgoods.org/proof/index.json` still lists
+`"reproduction-attestations"` in its scope, so the same key remains
+authorized. The manifest's `reproduction_attestations` array carries a
+second entry (alongside `003`'s) naming
+`attestations/004-nsgoods-2026-09-08.json`, `signed_by` matching
+`signed_by` above, and `jcs_sha256` matching the value confirmed by
+independent computation above — the signer's own published record agrees
+with what this repo can verify unilaterally.
+
+#### No verification script in this repo covers any of the three proof constructions
+
+None of `verify.py` or `verify_deployment.py` reads `attestations/*.json`
+or checks a `proof`/envelope of any kind — `verify.py` only *prints a
+suggested* (unsigned) attestation for a fresh run, and
+`verify_deployment.py` covers the separate tier-2 bytecode link, not
+attestation signatures. So there is no existing script that "errors on 003
+or 004" — there is no code path that touches any of the three proof
+constructions today; all three are currently manual-only. Extending
+`verify.py` (or a new `verify_attestations.py`) to check all three would
+need: a JCS/RFC 8785 canonicalizer (a plain
 `json.dumps(sort_keys=True, separators=(",", ":"))` suffices for the
 float-free documents in this repo, but a real RFC 8785 implementation would
 be needed for exact correctness in general), an ES256K JWS verifier keyed
 off a resolved `did:key` for the 001/002 scheme, `eth_account`'s
-`recover_message` for the 003 scheme, and — to make the authority check
-automatic rather than manual — an HTTP fetch of each attestation's
-`signerAuthorityManifest` plus a scope-membership check before treating a
-valid signature as sufficient. Not built as part of this task, per scope.
+`recover_message` for the 003 and 004 schemes (with different bytes fed in
+for each, per above), and — to make the authority check automatic rather
+than manual — an HTTP fetch of each attestation's authority manifest plus a
+scope-membership check before treating a valid signature as sufficient. Not
+built as part of this task, per scope.
 
 ## Independent Reproductions
 
-3 of the target 3-5 independent reproductions confirmed — Stage 1 minimum threshold met, all 3 cryptographically signed and independently verified. See `attestations/` for records.
+3 of the target 3-5 independent tier-1 reproductions confirmed — Stage 1
+minimum threshold met, all 3 cryptographically signed and independently
+verified (`001`, `002`, `003`). A first independent tier-2
+(deployed-bytecode) reproduction has also been confirmed and signed (`004`,
+2026-09-08) — see "Two identifiers" above for what tier 1 and tier 2 each
+establish, and why they're counted separately. See `attestations/` for all
+records.
 
 ## What changed — 2026-09-08
 
@@ -490,6 +578,34 @@ publishing that second link's definition, measured cost, and a script
 (`verify_deployment.py`) that lets anyone check it themselves — see "Two
 identifiers" above. That check did not exist, for anyone, before this
 release; it is not that it existed and failed.
+
+## What changed — 2026-09-09
+
+The first independent tier-2 reproduction was added:
+`attestations/004-nsgoods-2026-09-08.json`, signed by nsgoods under tag
+`pp-bytecode-v1`.
+
+**Why this carries more weight than a second same-host run would.** The
+reproducer's own independent driver produced identical values before ever
+running this repo's `verify_deployment.py`, so the agreement is not an
+artifact of running this repo's own script and trusting its output.
+`vk.key` was regenerated offline, in a network-isolated container, first —
+the chain was rebuilt from the published bundle rather than taken on trust.
+And it ran on a separate host with a fresh EZKL install, making it the
+first cross-host confirmation of the bytecode link.
+
+**What it does not establish.** No cross-host *timing* figure exists —
+`004`'s notes report no seconds measurement, and none was invented for it.
+Every timing number elsewhere in this README remains same-host.
+
+**What was checked on this side before accepting it.** The signature was
+verified by execution against five candidate byte sequences; only one
+recovers the declared signer, resolving an ambiguity in the attestation's
+own `scheme` string. The signer's authorization was confirmed separately
+against the published authority manifest. The repo commit the attestation
+cites was confirmed to exist (it is `HEAD`). `004` is also a third
+signature construction, distinct from the two already documented — see
+"Verifying a signed attestation's proof" above.
 
 ## Scope
 

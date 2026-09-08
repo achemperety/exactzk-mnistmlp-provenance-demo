@@ -1,0 +1,23 @@
+{
+  "payload": {
+    "reproducer": "nsgoods (nsgoods.org)",
+    "date": "2026-09-08T20:14:48+00:00",
+    "ezkl_version": "23.0.5",
+    "verification_scope": "tier2_bytecode",
+    "tag": "pp-bytecode-v1",
+    "vkHash_file": "dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f",
+    "vkHash_bytecode": "d0cab4041caaf77ea95fe45a29d14950be503ce26eb982af11026634112d8c67",
+    "halo2verifier_sol_sha256": "a843bcddb0aff97560139d92fd74c9bdfb0719e0a2fb8e17c92187e4e6da8636",
+    "checked_against": {
+      "address": "0x886b1baceB0552B2A4159663879b2841F3d81739",
+      "chainId": 84532
+    },
+    "matches_expected": true,
+    "notes": "Disposable 8c/16GB host. Cross-host: first reproduction of this bytecode link off the author own machine. vk.key regenerated offline (Docker, --network none) then create_evm_verifier plus a throwaway local anvil deploy; deployed runtime bytecode CBOR-stripped and keccak256 hashed. Live eth_getCode of the published verifier on Base Sepolia (84532) matched both our local deploy and the expected digest. vkHash_file is the keccak256 of vk.key (the on-chain VK identifier); vkHash_bytecode is the keccak256 of the stripped deployed verifier bytecode. Repo commit e72db1932ca00a5e8fecfdf5d93bedae5b634a1e. ezkl 23.0.5."
+  },
+  "jcs_sha256": "eb3ed181802b2e69532e5393e097177f57f11253c8b77d61aef9797c7c310e54",
+  "jcs_len": 1160,
+  "signature": "0x32f1327885bc20511a09d64bc6072e3b237c3af6cde9f5acdeff893ef45fb1f22e33ec770e27fe023d20a68a5dc497646c43a71945e8efad397923f1ac92d5d41c",
+  "signed_by": "0x57fF0F084Cba33e6761503f90eEF0Da9F159350c",
+  "scheme": "EIP-191 personal_sign (keccak256(\\x19Ethereum Signed Message:\\n1160 + JCS-canonical bytes)) over the RFC8785/JCS canonicalization of attestations/004-nsgoods-2026-09-08.json"
+}
