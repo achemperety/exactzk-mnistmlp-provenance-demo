@@ -553,6 +553,187 @@ verified (`001`, `002`, `003`). A first independent tier-2
 establish, and why they're counted separately. See `attestations/` for all
 records.
 
+## The public mirror stack — a quorum check anyone can run against public chain state
+
+Everything above (`verify.py`, `verify_deployment.py`, the four files under
+`attestations/`) establishes reproducibility. It does not, by itself, let a
+reader confirm that the on-chain passport attestation this project actually
+uses reflects those four records rather than something else — that requires
+reading live contract state and treating it with the same skepticism a
+client would, not taking this README's word for it. A second, fully
+self-consistent contract stack now exists on Base Sepolia for exactly that:
+deployed from a key with no relationship to this project's operational
+deployment, carrying byte-identical bytecode and the same `vk.key` for both
+circuits, so the four attestations resolve against it the same way they
+resolve against the deployment this project actually uses.
+
+**Two circuits are registered against this project's one model, and the
+check gives them opposite answers on the same deployment, with the same
+client logic:**
+
+| | Batch (`batchK8`) | Solo |
+|---|---|---|
+| Verifier | `0x886b1baceB0552B2A4159663879b2841F3d81739` (same address as "Two identifiers" above) | `0x6D282dB5FE9833A6b5f995C5645188f2e4286e43` |
+| `vkHashFile` | `0xdd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | `0x13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2` |
+| `tier1Count` | **3** (`001`, `002`, `003` — all `pp-repro-v2`) | **0** |
+| `avgScore` | 100 | 0 |
+| `bytecodeBindingVerified` | true | true — **see the trap below before reading this as partial credit** |
+| Tier-2 (`pp-bytecode-v1`) | 1 (`004`, nsgoods) | 0 |
+| `allowed` (quorum policy: ≥1 verified tier-1 record, avg score ≥51) | **true** | **false** |
+
+The batch row restates what "Independent Reproductions" above already says,
+now confirmed against a second, independently-deployed stack rather than
+only the deployment this repo's own scripts point at. The solo row is new
+information: **nobody has ever reproduced the solo circuit's `vk.key`.**
+Zero third parties, zero tier-1 records, zero tier-2 records. This is not a
+gap in this particular check — it is the true, current state of that
+circuit, on both the operational deployment and this public mirror,
+independently. A page that reported only the batch row would be exactly the
+kind of partial claim this repo exists to correct.
+
+### The `bytecodeBindingVerified` trap
+
+`bytecodeBindingVerified` reads `true` for **both** circuits. Reading that
+field on its own, a natural conclusion is that solo has *some* attestation
+coverage — bytecode binding, even if nothing else. That conclusion is wrong,
+and the reason is structural, not incidental: `bytecodeBindingVerified`
+means only that the verifier's live deployed bytecode matches the
+`vkHashBytecode` value written into that circuit's on-chain `CircuitRecord`
+at `addCircuit` time. The party who writes that record is the registrar —
+the same mirror key that deployed the whole stack — and a registrar can
+satisfy this check for any circuit, attested or not, simply by deploying the
+verifier it claims and registering the bytecode hash that verifier actually
+produces. It requires no third party, no signature, no independent
+observation. It is a self-consistency check on the registrar's own
+bookkeeping, not a claim from anyone the registrar doesn't control.
+
+`tier1Count` and the tier-2 attestation count are the numbers that actually
+carry third-party weight, precisely because they can only reach a nonzero
+value if someone *other than the registrar* signed a statement, published
+it, and had that statement resolve against a `requestHash` the registrar
+didn't get to choose the meaning of. `bytecodeBindingVerified=true` next to
+`tier1Count=0` is not "partially attested" — it is "unattested, and the
+registrar's own bookkeeping happens to be internally consistent," which is
+true of every circuit a competent registrar deploys, attested or not.
+
+### Running the check yourself
+
+[`verify_onchain_quorum.py`](verify_onchain_quorum.py) performs the check
+above end to end, for both circuits, against the public mirror stack over a
+public RPC:
+
+```bash
+pip install web3==7.16.0 eth-abi eth-account eth-utils ecdsa requests
+python3 verify_onchain_quorum.py
+```
+
+For each circuit it: reads `escrow.models()` and
+`anchor.getCircuitByVerifier()` to get the on-chain `CircuitRecord`;
+recomputes `bytecodeBindingVerified` from a live `eth_getCode` read (never
+trusting the field name — it recomputes the hash itself); for every trusted
+attester × tag pair, reconstructs the expected `requestHash` and checks
+whether the registry actually resolves it; for every hash that resolves,
+fetches the `responseURI` the registry stored and downloads that file;
+verifies that file's own signature by its own construction (three different
+schemes across the four batch records — see "Verifying a signed
+attestation's proof" above); checks the verified document's claimed digest
+against the circuit's on-chain values; and only then counts it. It prints
+every intermediate value — every `requestHash`, every resolution outcome,
+every recovered signer address, every content check — not just a final
+pass/fail.
+
+Unlike `verify_deployment.py`, every dependency here is pure-Python and
+pip-installable — no local `anvil`/Foundry toolchain, nothing to compile.
+Unlike `verify_deployment.py`'s `--vk-path` default, this script also needs
+no weights, no ONNX file, and no `srs.bin` at all: it never runs
+`compile_circuit`/`setup`, so its host-memory footprint is the ordinary
+footprint of a script making HTTP requests, not the ~7–8 GB tier 1 needs.
+Every network call it makes is against something genuinely public and needs
+no credentials: the Base Sepolia public RPC, wherever each registry
+record's `responseURI` actually points (read live from the chain, not
+hardcoded — currently raw GitHub content for all four batch records), and
+one endpoint run by nsgoods themselves
+(`https://x402.nsgoods.org/proof/index.json`) that the two nsgoods-signed
+records' authority check needs — if that endpoint is ever down or altered,
+the affected record's authority check fails closed, the same way a bad
+signature would, rather than silently passing.
+
+### What this establishes, and what it does not
+
+The chain this whole repo is about is **artifacts → `vk.key` → compiled
+verifier → deployed bytecode**. Every reproduction in this README — `001`
+through `004`, and everything `verify_onchain_quorum.py` checks — establishes
+*correspondence along that chain*: that the bytes at each link really do
+derive from the bytes at the link before it, independently confirmed by
+parties who didn't have to trust this repo's own tooling to reach that
+conclusion. It establishes nothing about whether the model weights
+themselves are what anyone claims they are — model weights are the input to
+the *first* link, upstream of everything this bundle can check, and no
+outside party can verify that upstream fact for a closed-weight model from
+artifacts alone. "This `vk.key` really does come from this ONNX file" and
+"this ONNX file really is the model its owner says it is" are different
+claims; this repo, and the quorum check above, only ever make the first one.
+
+Kept separate for the same reason: a proof-gated settlement (the design this
+circuit belongs to) makes payment and provable output availability *one*
+atomic state transition — the buyer cannot end up paying without the
+provable output existing, and vice versa, because both happen in the same
+transaction. Whether the buyer actually receives a *usable* output before
+that settlement is a different property, established (in the larger design)
+by optimistic delivery ahead of settlement, not by the proof-gate itself.
+Neither property substitutes for the other, and nothing in this repo or in
+the quorum check above establishes the optimistic-delivery half — that
+mechanism lives in the private project this bundle was extracted from.
+
+### The public mirror stack itself
+
+The addresses below are a **public mirror** of this project's contracts —
+deployed from a key generated solely for this purpose, which has never sent
+or received a transaction involving any address in this project's
+operational deployment. This project's operational deployment exists,
+predates the mirror, and is **not published here** — deliberately, not as an
+oversight or a lesser-status omission. `PassportAnchorV2.escrow` is a public
+immutable, and `addCircuit` requires the registered verifier to match the
+escrow's own verifier; calling the operational anchor's own public getters
+would hand any reader the operational escrow, registry, and verifier
+addresses, and from a contract address alone its creation transaction
+reveals the deploying key, whose transaction history reveals every other
+contract that key has ever touched. A contract's public state cannot be
+caveated into staying private after the fact — the only fix is a second
+stack signed by a key that has never touched the operational one, not a
+disclaimer added to the first.
+
+This works because the four attestations are signed over digests of
+`vk.key` and of deployed bytecode, never over a specific deployment address
+— any instance carrying byte-identical bytecode and the same `vk.key`
+satisfies them equally, which is exactly what makes the mirror a legitimate
+target for the same check rather than a weaker substitute for one.
+
+| Contract | Address |
+|---|---|
+| `PassportAnchorV2` (anchor) | `0xD0B577776A239E3eE3b39373f2380E366c3a987f` |
+| `MockValidationRegistry` (registry) | `0x5421E241668AA5e2Bc6Da2c5642Fa9bFc8A5d996` |
+| `ZkInferenceEscrowV2` (escrow) | `0x27e4DfA9e435a463A947e4eD8f74d8aB86F2F4CF` |
+| Solo `Halo2Verifier` | `0x6D282dB5FE9833A6b5f995C5645188f2e4286e43` |
+| Batch `Halo2Verifier` | `0x886b1baceB0552B2A4159663879b2841F3d81739` (same address published in "Two identifiers" above) |
+| `modelId` | `0x06ef1c26ba4f218306433064fb65a8d0fbaffab707fb224505f0e256e23f2e8d` |
+
+All on Base Sepolia, chainId `84532`. Only the addresses `verify_onchain_quorum.py`
+actually needs are published here — nothing from the operational deployment
+appears anywhere in this repo.
+
+### Solo, unattested — and cheap to check
+
+If you've already run the batch reproduction bundle (`verify.py`), solo is
+close to free by comparison. The batch `srs.bin` in this repo is
+67,109,124 bytes; the solo circuit's own `srs.bin` is 8,388,868 bytes —
+about 8× smaller, with proportionally smaller `setup()` memory and time.
+Solo's artifacts aren't part of this published bundle yet, but the circuit,
+its `vkHashFile`, and its `vkHashBytecode` are all live on both the
+operational and public-mirror deployments today, unattested by anyone. The
+smallest reproduction this project can currently ask for is exactly that
+one.
+
 ## What changed — 2026-09-08
 
 The deployed verifier contract had, for a period, been generated from an
