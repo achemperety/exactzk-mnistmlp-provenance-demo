@@ -186,22 +186,42 @@ it, don't just use "latest."
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install ezkl==23.0.5 eth-utils==6.0.0 pycryptodome==3.20.0
-python3 verify.py
+python3 verify.py               # batch
+python3 verify.py --circuit solo   # solo
 ```
 
-`verify.py` runs `ezkl.compile_circuit()` then `ezkl.setup()` (no
-GPU required; expect ~15–100s and a peak RSS of roughly 7–8 GB depending on
-host — this matches the memory profile already documented for this circuit
-in the parent project). It writes a ~5.2 GB `pk.key` to a temp directory
-(deleted on exit) as a byproduct of `setup()` — that's normal, `pk.key` is
-not itself part of what's being verified here.
+**Python version:** this native path is verified under **Python 3.13.6** —
+what actually reproduced both circuits' canonical digests this session. No
+other interpreter version has been tested against the native path; treat
+3.13.6 as the one confirmed point, not a stated-compatible range. (The
+Docker path below pins `python:3.11-slim` in its base image, but that pin
+has not been exercised by an actual build+run in this environment — see
+"Docker verification status" below before treating 3.11 as confirmed too.)
+
+`verify.py` runs `ezkl.compile_circuit()` then `ezkl.setup()` (no GPU
+required). Cost differs substantially by circuit:
+
+| Circuit | Wall-clock | Peak RSS | `pk.key` byproduct |
+|---|---|---|---|
+| batch (default) | ~15–100s (host-dependent) | ~7–8 GB | ~5.2 GB, written to a temp dir, deleted on exit |
+| solo (`--circuit solo`) | ~2.3s (measured) | ~1.5 GB (measured) | smaller, same temp-dir/delete-on-exit handling |
+
+`pk.key` is a byproduct of `setup()` in both cases, not itself part of what's
+being verified here.
 
 ## Reproduce — Docker (no local toolchain dependency)
 
 ```bash
 docker build -t mnistmlp-repro .
-docker run --rm mnistmlp-repro
+docker run --rm mnistmlp-repro                              # batch (default, same as before)
+docker run --rm mnistmlp-repro --circuit solo                # solo
 ```
+
+One image covers both circuits — `solo/` is copied into the image alongside
+the batch files, and the circuit is chosen at `docker run` time (via
+`ENTRYPOINT`/`CMD`, not baked into the image), not by rebuilding. Running
+with no arguments keeps the exact default behavior this image has always
+had: batch.
 
 The `Dockerfile` pins `ezkl==23.0.5`, `eth-utils==6.0.0`, and
 `pycryptodome==3.20.0` (the keccak256 backend `eth-utils` needs) explicitly, so
@@ -210,9 +230,45 @@ versions "by luck." It also pins `--platform=linux/amd64`, because
 `ezkl==23.0.5` ships a `manylinux2014_x86_64` wheel on PyPI but no
 `linux/aarch64` wheel for this version — on an Apple Silicon Docker host
 this runs under emulation (works, just slower to build/pull than native).
-Allow the container at least ~8 GB of memory (Docker Desktop's default
-resource limits are usually sufficient on modern machines; increase if
-`setup()` gets OOM-killed).
+The base image is `python:3.11-slim`, pinned by content digest.
+
+**Memory: scoped per circuit, not one blanket number.** The two circuits'
+requirements differ by roughly 5×, and applying batch's number to a solo run
+wastes most of an ~8 GB container allowance; applying solo's number to a
+batch run OOM-kills it.
+
+| Circuit | Container memory |
+|---|---|
+| batch (default) | at least ~8 GB, extrapolated from the native peak RSS above plus container overhead (Docker Desktop's default resource limits are usually sufficient on modern machines; increase if `setup()` gets OOM-killed) — **not independently measured through Docker itself, see below** |
+| solo (`--circuit solo`) | at least ~2 GB, extrapolated from the native peak RSS above (~1.5 GB) plus container/base-image overhead — **not independently measured through Docker itself, see below** |
+
+### Docker verification status
+
+**Not verified by an actual build+run as of this revision.** Docker was not
+available in the environment these Dockerfile and README changes were made
+in (`docker info` failed, and the local Docker Desktop install was
+incomplete — its app bundle pointed at an unmounted volume). The memory
+figures above are extrapolated from the native, non-Docker peak-RSS
+measurements elsewhere in this README, plus a margin for base-image and
+container overhead — **not measured inside a container**, and the wall-clock
+cost of `linux/amd64` emulation on non-x86 hosts (mentioned above) is
+entirely unmeasured for both circuits.
+
+Before this bundle goes to reviewers, someone with a working Docker install
+needs to actually run:
+
+```bash
+docker build -t mnistmlp-repro .
+docker run --rm mnistmlp-repro                # confirm still reproduces batch's dd03fb0c…675f
+docker run --rm mnistmlp-repro --circuit solo # confirm now reproduces solo's 13cff042…4ff2
+```
+
+and replace this section with the measured wall-clock and peak container
+memory for both. Until that happens, treat the Docker path as
+structurally updated (files copied, circuit selectable at `docker run`
+time) but **functionally unverified** — the same caution that applied to
+solo's `vk.key` digest before it was reproduced from scratch applies here to
+the Docker path itself.
 
 ## Reproduce — the second link (`verify_deployment.py`)
 

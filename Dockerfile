@@ -15,5 +15,11 @@ RUN pip install --no-cache-dir \
 
 WORKDIR /repro
 COPY model_k8.onnx model_k8.onnx.data settings.json input.json srs.bin verify.py ./
+COPY solo/ ./solo/
 
-CMD ["python3", "verify.py"]
+# ENTRYPOINT+CMD (not a single CMD) so the circuit is selected at `docker run`
+# time, not baked in: `docker run --rm mnistmlp-repro` keeps today's default
+# (batch, CMD supplies no args), and `docker run --rm mnistmlp-repro --circuit
+# solo` overrides CMD to run solo instead -- same image, no rebuild.
+ENTRYPOINT ["python3", "verify.py"]
+CMD []
