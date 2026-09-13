@@ -285,6 +285,90 @@ this circuit belongs to requires a universal SRS from a real trusted-setup
 ceremony (e.g. Perpetual Powers of Tau), not this file. Do not reuse
 `srs.bin` for anything where soundness matters.
 
+## Solo bundle
+
+Everything above covers the K=8 batch circuit. This repo also publishes the
+**solo** circuit (`batch_size: 1`, same underlying model) alongside it, in
+`solo/`, structured the same way so the tooling and conventions above carry
+over directly — the only difference is `--circuit solo` on `verify.py` and a
+`solo/` directory prefix on every path.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `solo/model_solo.onnx` + `solo/model_solo.onnx.data` | The ONNX model (external-data format) |
+| `solo/settings.json` | EZKL circuit settings (`batch_size: 1`) |
+| `solo/input.json` | A real sample input actually used to build and witness this circuit |
+| `solo/srs.bin` | The structured reference string used for `setup()` — same caveats as the batch `srs.bin`, see "About `srs.bin`" above |
+
+**`model_solo.onnx.data` is byte-identical to the batch bundle's
+`model_k8.onnx.data`** — confirmed live for this release, not assumed from
+an earlier finding: both hash to
+`sha256=b96f93301048ea7af8eeaca094fee834111a4c1a3a639f17fb5f61b0b13a2612`.
+If you've already fetched the batch bundle, you already have this file —
+the remaining four below are the only new bytes solo actually needs from
+you, which is the point of publishing it alongside batch rather than as a
+separate download.
+
+Pinned input digests (checked automatically by `verify.py --circuit solo`
+before it runs anything):
+
+```
+model_solo.onnx       sha256=c3caeb161859f91da3233830c3f43e5ed9f0c47cdc2913d1a48ffe42a3a51e90
+model_solo.onnx.data  sha256=b96f93301048ea7af8eeaca094fee834111a4c1a3a639f17fb5f61b0b13a2612
+settings.json         sha256=dcae92a6d5fd8435b299b2df1f727a370fbdf9db9461e6d997c7bdd4b94ac6c4
+input.json            sha256=892c2f91fcd78b846e83f510b70db8c7e5480e692c989a3ed8c6e81632cd84c3
+srs.bin                sha256=e4690b6479fceefdc2486372ceeaf274d7a336f908463caa619b7bc42ebfe9be
+```
+
+The same five digests, `sha256sum`-compatible, are committed as
+[`solo/MANIFEST.sha256`](solo/MANIFEST.sha256) — same convenience-pointer
+status as the root `MANIFEST.sha256` above:
+
+```bash
+cd solo && shasum -a 256 -c MANIFEST.sha256
+```
+
+`solo/MANIFEST.sha256`'s own bundle digest (`SHA256(solo/MANIFEST.sha256)`):
+
+```
+db0d6fe41a387d25f14902e9acada2c00c35c884e353d803aeccdda6ebc85b8f
+```
+
+### Target: the solo `vk.key`
+
+| Digest | Value | What it is |
+|---|---|---|
+| `SHA256(vk.key)` | `32439290a76c2ef71fb6f20ef203b001b54d9835b411554bae827df5364e9523` | Raw artifact hash of the solo Halo2 verifying key file |
+| `keccak256(vk.key)` | `13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2` | The solo circuit's `vkHashFile`, as registered in its on-chain `CircuitRecord` on the public mirror stack (see "The public mirror stack" below) |
+
+Both digests were computed from a fresh, from-scratch reproduction run done
+for this release — `ezkl.compile_circuit()` + `ezkl.setup()` against the
+four files above, in a clean temp directory — not quoted or carried over
+from an earlier document. `verify_onchain_quorum.py`'s live on-chain read
+confirms the same `vkHashFile` is what the public mirror's solo
+`CircuitRecord` actually carries.
+
+### Reproduce
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install ezkl==23.0.5 eth-utils==6.0.0 pycryptodome==3.20.0
+python3 verify.py --circuit solo
+```
+
+**Measured this session** (Apple Silicon macOS host, native, no Docker):
+wall-clock ≈2.3s, peak RSS ≈1.5 GB. This confirms, rather than inherits, the
+"roughly two seconds and 1.5 GB" figure quoted to attesters earlier from an
+older document — about 8× smaller `srs.bin` than batch (8,388,868 bytes vs.
+67,109,124 bytes) gives proportionally smaller `setup()` cost, same
+relationship noted in "Solo — now published, still unattested" below.
+
+`verify.py` with no argument, or `--circuit batch`, continues to reproduce
+the batch bundle exactly as before — `--circuit` is an additive flag, not a
+behavior change to the existing default path.
+
 ## Attestation format
 
 If you reproduce this and want to let us know, here's the shape we'd
@@ -522,6 +606,48 @@ second entry (alongside `003`'s) naming
 independent computation above — the signer's own published record agrees
 with what this repo can verify unilaterally.
 
+#### The `scheme`/`signingScheme` wording in 003 and 004 is imprecise — files left unedited
+
+Every digest, address, and signature confirmed in the two sections above is
+correct — the step-by-step constructions given there are what this repo
+actually executed and verified. Separately, the attester has confirmed that
+each file's own one-line description of that construction (`003`'s
+`proof.signingScheme` / `proof.canonicalization`, `004`'s `scheme`) is
+imprecise about *scope*:
+
+- **`003`**: `proof.canonicalization: "RFC8785"` names the scheme but not
+  what it's applied to, and doesn't state that `proof` is excluded — a
+  reader could take it to mean the whole document. The accurate scope,
+  already derived and executed step by step above: RFC 8785 over the
+  document **with the whole `proof` key removed**, not the whole file.
+- **`004`**: `scheme` reads "...over the RFC8785/JCS canonicalization of
+  `attestations/004-nsgoods-2026-09-08.json`" — read literally, the whole
+  file. As derived above, that reading is circular (the file contains the
+  signature it would be canonicalizing) and cannot be what's actually
+  signed. The accurate scope, already derived and executed step by step
+  above: RFC 8785 over the **`payload` sub-object only**, not the whole
+  file.
+
+This correction comes from the signer, not from a re-reading of the files on
+this end: `https://x402.nsgoods.org/proof/index.json`'s
+`reproduction_attestations` entries for `003` and `004` now state each
+scope explicitly and unambiguously — "...with proof key removed" for `003`,
+"...over payload sub-object only" for `004` — alongside the same
+`jcs_sha256` values independently confirmed above. The signer's manifest now
+carries the accurate semantics; the attestation files' own summary sentence
+does not.
+
+**`003` and `004` themselves are deliberately left unedited.** Both are
+published, signed artifacts that exist byte-for-byte both in this repo and
+at the signer's own URLs above; editing this repo's copy would make the two
+diverge while this README elsewhere states they are kept identical. The
+signer made the same call himself a week earlier — pinning the accurate
+semantics in his manifest rather than re-signing either file. A reader who
+follows the step-by-step construction given in full in the sections above —
+not the files' own summary sentence — lands on the correct bytes either way,
+which is exactly why every digest and signature above verifies despite the
+imprecise wording.
+
 #### No verification script in this repo covers any of the three proof constructions
 
 None of `verify.py` or `verify_deployment.py` reads `attestations/*.json`
@@ -722,17 +848,28 @@ All on Base Sepolia, chainId `84532`. Only the addresses `verify_onchain_quorum.
 actually needs are published here — nothing from the operational deployment
 appears anywhere in this repo.
 
-### Solo, unattested — and cheap to check
+### Solo — now published, still unattested
 
 If you've already run the batch reproduction bundle (`verify.py`), solo is
 close to free by comparison. The batch `srs.bin` in this repo is
 67,109,124 bytes; the solo circuit's own `srs.bin` is 8,388,868 bytes —
-about 8× smaller, with proportionally smaller `setup()` memory and time.
-Solo's artifacts aren't part of this published bundle yet, but the circuit,
-its `vkHashFile`, and its `vkHashBytecode` are all live on both the
-operational and public-mirror deployments today, unattested by anyone. The
-smallest reproduction this project can currently ask for is exactly that
-one.
+about 8× smaller, with proportionally smaller `setup()` memory and time
+(measured this release: ≈2.3s wall-clock, ≈1.5 GB peak RSS — see "Solo
+bundle" above). Solo's artifacts are now published, in `solo/` — see "Solo
+bundle" above for the files, digests, and `verify.py --circuit solo`.
+
+Publishing the bundle changes what a third party *can* do, not what anyone
+has done: the circuit, its `vkHashFile`, and its `vkHashBytecode` are live
+on both the operational and public-mirror deployments, and
+`verify_onchain_quorum.py` above already checks solo the same way it checks
+batch (same client logic, no separate code path) — run live against the
+public mirror for this release, it still reports exactly what the table
+above shows: **zero** third-party reproductions of any kind for solo, zero
+tier-1 records, zero tier-2 records. That's the true, current state, not a
+default or a placeholder the script falls back to. The smallest
+reproduction this project can currently ask for is exactly this one, and it
+is now something a third party can actually go do from published bytes
+instead of only from a description of what solo is.
 
 ## What changed — 2026-09-08
 
@@ -787,6 +924,30 @@ against the published authority manifest. The repo commit the attestation
 cites was confirmed to exist (it is `HEAD`). `004` is also a third
 signature construction, distinct from the two already documented — see
 "Verifying a signed attestation's proof" above.
+
+## What changed — 2026-09-13
+
+The solo circuit's reproduction bundle is now published, alongside the
+existing batch one, in `solo/` — see "Solo bundle" above. It was rebuilt
+from scratch for this release from the parent project's own
+`run_t3_k5_nonces` artifacts (`ezkl.compile_circuit()` + `ezkl.setup()` in a
+clean temp directory) and its `vk.key` digests were computed from that
+reproduction, not quoted — both match what the public mirror stack has
+carried as the solo circuit's `vkHashFile` since that stack existed.
+
+`verify.py` is now parameterized (`--circuit {batch,solo}`, default
+`batch`) instead of duplicated per circuit; its existing no-argument
+behavior is unchanged. `verify_onchain_quorum.py` needed no code changes —
+it already checks both circuits generically from on-chain state, for every
+prior release — this release only re-ran it live to confirm the solo path
+resolves genuinely rather than defaulting to zero (see "Solo — now
+published, still unattested" above).
+
+Also added: a note correcting the `scheme`/`signingScheme` wording in
+`attestations/003` and `attestations/004` (see "Verifying a signed
+attestation's proof" above). The attestation files themselves are
+unedited — the correction lives in the signer's own manifest and is now
+cross-referenced here.
 
 ## Scope
 
