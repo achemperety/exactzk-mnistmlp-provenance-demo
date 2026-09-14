@@ -103,7 +103,7 @@ different questions:
 
 | Identifier | Formula | What it establishes |
 |---|---|---|
-| `vkHash_file` | `keccak256(vk.key)` = `dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | That an independent party, given the five files in this repo, can reproduce the exact same `vk.key` this project's on-chain passport attestation is keyed on. **This is what `verify.py` checks, and what all four records in `attestations/` attest to — `004` reports it alongside `vkHash_bytecode` since reproducing the bytecode link required regenerating `vk.key` first.** |
+| `vkHash_file` | `keccak256(vk.key)` = `dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | That an independent party, given the five files in this repo, can reproduce the exact same `vk.key` this project's on-chain passport attestation is keyed on. **This is what `verify.py` checks, and what all five records in `attestations/` attest to — `004` reports it alongside `vkHash_bytecode` since reproducing the bytecode link required regenerating `vk.key` first, and `005` reports the solo circuit's own `vkHash_file` (`13cff042…4ff2`) rather than this batch one.** |
 | `vkHash_bytecode` | `keccak256(stripCborMetadata(eth_getCode(deployedVerifier)))` = `d0cab4041caaf77ea95fe45a29d14950be503ce26eb982af11026634112d8c67` | That the compiled, deployed Solidity verifier contract's runtime bytecode matches what `vk.key` (plus a pinned EZKL + solc toolchain) produces. This is a **separate, additionally-verifiable** link, not implied by a `vk.key` reproduction alone. **This is what `verify_deployment.py` checks.** |
 
 The full chain, one digest per link:
@@ -115,7 +115,7 @@ model weights --[tier 1]--> vk.key --[tier 2]--> Halo2Verifier.sol --[tier 2]-->
 
 | Link | Reproduced by | Cost | What it does / does not establish |
 |---|---|---|---|
-| **Tier 1** — published artifacts → `vk.key` | Anyone who runs `compile_circuit`+`setup` from the five files in this repo (`verify.py`). Requires the weights-derived ONNX files. | ~15–100s, ~7–8 GB peak RSS (measured, varies by host) | Establishes that `vk.key` — and therefore the `vkHash_file` this project's passport attestation is keyed on — really does come from this published bundle. Says nothing on its own about what contract is actually deployed on-chain. **Independently confirmed 3 times** (`001`, `002`, `003`) — see `attestations/`, which also now holds tier 2's first independent confirmation (`004`; tier 1 vs. tier 2 scope is stated per file, not assumed from the directory — see "What tier 2 does..." below). |
+| **Tier 1** — published artifacts → `vk.key` | Anyone who runs `compile_circuit`+`setup` from the five files in this repo (`verify.py`). Requires the weights-derived ONNX files. | ~15–100s, ~7–8 GB peak RSS (measured, varies by host) | Establishes that `vk.key` — and therefore the `vkHash_file` this project's passport attestation is keyed on — really does come from this published bundle. Says nothing on its own about what contract is actually deployed on-chain. **Independently confirmed 3 times for the batch circuit** (`001`, `002`, `003`) **and once for the solo circuit** (`005`, 2026-09-13) — see `attestations/`, which also holds tier 2's first independent confirmation (`004`; tier 1 vs. tier 2 scope, and which *circuit* a record covers, are stated per file, not assumed from the directory — see "What tier 2 does..." below). |
 | **Tier 2** — `vk.key` → `Halo2Verifier.sol` → deployed bytecode | Anyone with `vk.key` + `settings.json` + `srs.bin` — **no weights, no ONNX file, ever** (`verify_deployment.py`). | **MEASURED, this session, Apple Silicon macOS host, native (no Docker):** `create_evm_verifier()` 0.230s + `deploy_evm()` (solc compile + broadcast + mine, local Anvil) 0.079s ≈ **0.31s total**. The parent project's own measurement of this same step, on the same Apple Silicon M4 Pro, came in at ~0.28s — the ~10% spread between the two runs is ordinary run-to-run variance on one machine, not independent cross-host confirmation. A **cross-host reproduction** (not a timing benchmark — `004`'s notes report no seconds figure) now exists: `attestations/004-nsgoods-2026-09-08.json`, a disposable 8-core/16GB host with a fresh EZKL install, independent of the machine this 0.31s/0.28s comparison was measured on. No cross-host **timing** measurement has been published yet. Three fixed input files, exactly (`inspect.signature(ezkl.create_evm_verifier)` takes no ONNX or weights path). | Establishes that the runtime bytecode actually deployed at a given address is what `vk.key` compiles and deploys to, under EZKL `23.0.5`'s codegen and whatever solc version it selects internally (not independently pinned by this project). Says nothing about whether `vk.key` itself was honestly derived from real weights — that's tier 1's job. |
 
 **Tier 2 now has one third-party attestation; tier 1 still has more.**
@@ -204,7 +204,13 @@ required). Cost differs substantially by circuit:
 | Circuit | Wall-clock | Peak RSS | `pk.key` byproduct |
 |---|---|---|---|
 | batch (default) | ~15–100s (host-dependent) | ~7–8 GB | ~5.2 GB, written to a temp dir, deleted on exit |
-| solo (`--circuit solo`) | ~2.3s (measured) | ~1.5 GB (measured) | smaller, same temp-dir/delete-on-exit handling |
+| solo (`--circuit solo`) | ~1.8–14.5s across three measured hosts | ~0.96–1.55 GB across the same three hosts | ~0.66 GB, same temp-dir/delete-on-exit handling |
+
+Solo's numbers are a **measured range across three hosts, not a requirement** —
+see "Cost: three measured hosts, one `vk.key`" under "Solo bundle" below for
+each host and its own figures. The fast/high-memory end is an Apple Silicon
+macOS host; the slow/low-memory end is a 2-core x86 cloud VM. All three land on
+the same `vk.key`, byte for byte.
 
 `pk.key` is a byproduct of `setup()` in both cases, not itself part of what's
 being verified here.
@@ -240,7 +246,7 @@ batch run OOM-kills it.
 | Circuit | Container memory |
 |---|---|
 | batch (default) | at least ~8 GB, extrapolated from the native peak RSS above plus container overhead (Docker Desktop's default resource limits are usually sufficient on modern machines; increase if `setup()` gets OOM-killed) — **not independently measured through Docker itself, see below** |
-| solo (`--circuit solo`) | at least ~2 GB, extrapolated from the native peak RSS above (~1.5 GB) plus container/base-image overhead — **not independently measured through Docker itself, see below** |
+| solo (`--circuit solo`) | at least ~2 GB, extrapolated from the **highest** native peak RSS measured on any host so far (~1.55 GB) plus container/base-image overhead — the lowest measured host needed only ~957 MB, so ~2 GB is a ceiling to provision against, not a floor solo needs — **not independently measured through Docker itself, see below** |
 
 ### Docker verification status
 
@@ -266,9 +272,27 @@ docker run --rm mnistmlp-repro --circuit solo # confirm now reproduces solo's 13
 and replace this section with the measured wall-clock and peak container
 memory for both. Until that happens, treat the Docker path as
 structurally updated (files copied, circuit selectable at `docker run`
-time) but **functionally unverified** — the same caution that applied to
-solo's `vk.key` digest before it was reproduced from scratch applies here to
-the Docker path itself.
+time) but **functionally unverified**.
+
+**The two solo reproductions of 2026-09-13 do not close this item.** Both were
+native runs — one on Apple Silicon, one on an x86 cloud host under
+`unshare -n` — so neither exercised the `Dockerfile`, the pinned
+`python:3.11-slim` base image, the `linux/amd64` emulation path, or a
+container memory limit. Reproducing `vk.key` natively and reproducing it
+through this image are different claims, and only the first now has
+third-party evidence. Note also the analogy this section used to draw is now
+spent: solo's `vk.key` digest *has* since been reproduced from scratch by a
+third party (`attestations/005-nsgoods-2026-09-13.json`); the Docker path is
+now the only item here still in the "structurally updated, functionally
+unverified" state.
+
+**What would close it, and who can.** One of the `005` reproducers has offered
+to run the container on a throwaway host. The item closes when someone
+publishes, for **each** circuit: wall-clock, peak **container** memory (not
+host RSS), and confirmation that the run printed the circuit's canonical
+digest — `dd03fb0c…675f` for batch, `13cff042…4ff2` for solo. Anything less
+than both circuits, or a host-RSS figure standing in for a container figure,
+leaves it open.
 
 ## Reproduce — the second link (`verify_deployment.py`)
 
@@ -406,6 +430,12 @@ from an earlier document. `verify_onchain_quorum.py`'s live on-chain read
 confirms the same `vkHashFile` is what the public mirror's solo
 `CircuitRecord` actually carries.
 
+**Both digests have since been reproduced independently**, on 2026-09-13, by a
+third party on different hardware —
+[`attestations/005-nsgoods-2026-09-13.json`](attestations/005-nsgoods-2026-09-13.json),
+signed — and by a second reproducer who reported the same digests unsigned. See
+"Cost: three measured hosts, one `vk.key`" below.
+
 ### Reproduce
 
 ```bash
@@ -414,12 +444,35 @@ pip install ezkl==23.0.5 eth-utils==6.0.0 pycryptodome==3.20.0
 python3 verify.py --circuit solo
 ```
 
-**Measured this session** (Apple Silicon macOS host, native, no Docker):
-wall-clock ≈2.3s, peak RSS ≈1.5 GB. This confirms, rather than inherits, the
-"roughly two seconds and 1.5 GB" figure quoted to attesters earlier from an
-older document — about 8× smaller `srs.bin` than batch (8,388,868 bytes vs.
-67,109,124 bytes) gives proportionally smaller `setup()` cost, same
-relationship noted in "Solo — now published, still unattested" below.
+#### Cost: three measured hosts, one `vk.key`
+
+These are measurements, not requirements. Solo's `vk.key` is **157,511 bytes**
+on every one of them, with the same `sha256` and the same `keccak256` — the
+length is not separately attested by each reproducer, it follows from the
+matching `sha256` over the whole file:
+
+| Host | Interpreter | Wall-clock | Peak RSS | Source |
+|---|---|---|---|---|
+| Apple Silicon macOS, native | Python 3.13.6 | ≈1.8s | ≈1.55 GB | this repo, re-measured 2026-09-14 (the 2026-09-13 release recorded ≈2.3s / ≈1.5 GB on an Apple Silicon macOS host too) |
+| Apple Silicon, native | Python 3.13.6 | ≈3.13s | ≈1.37 GB | independent reproducer, unsigned report |
+| 2-core x86 cloud VM, native, network namespace dropped (`unshare -n`) during compute | Python 3.13.15 | ≈14.5s | ≈957 MB | [`005-nsgoods-2026-09-13.json`](attestations/005-nsgoods-2026-09-13.json), signed |
+
+**The spread is the point.** Wall-clock differs by roughly **6×** across these
+hosts and peak RSS by about **400 MB** — and the output is byte-identical
+anyway. That is determinism *demonstrated across architectures*, not asserted:
+if the digest tracked anything host-specific — instruction set, core count,
+interpreter patch version, allocator behaviour that peaked at 957 MB on one host
+and 1.55 GB on another — these three runs would have diverged. They did not.
+This is a stronger statement than two signatures on one architecture would have
+been.
+
+It also means **any single memory number here is host-specific.** Provision
+against the range, not against one figure; ~957 MB was sufficient on the
+smallest host measured.
+
+About 8× smaller `srs.bin` than batch (8,388,868 bytes vs. 67,109,124 bytes)
+gives proportionally smaller `setup()` cost, same relationship noted in "Solo
+— published, and now independently reproduced" below.
 
 `verify.py` with no argument, or `--circuit batch`, continues to reproduce
 the batch bundle exactly as before — `--circuit` is an additive flag, not a
@@ -469,12 +522,18 @@ constructions, not one:
 |---|---|---|
 | [`001-maha-strategies-2026-08-31.json`](attestations/001-maha-strategies-2026-08-31.json), [`002-bitsanity-2026-09-04.json`](attestations/002-bitsanity-2026-09-04.json) | `proof.type: JsonWebSignature2020` | JWS over RFC 8785 (JCS) canonical bytes, `did:key` signer |
 | [`003-nsgoods-2026-09-07.json`](attestations/003-nsgoods-2026-09-07.json) | `proof.type: EthereumEip191Signature`, embedded `proof` object | EIP-191 `personal_sign` over RFC 8785 (JCS) canonical bytes with the whole `proof` key removed, Ethereum-address signer |
-| [`004-nsgoods-2026-09-08.json`](attestations/004-nsgoods-2026-09-08.json) | No `proof` object — `payload` is a top-level sibling of `signature`/`jcs_sha256`/`jcs_len`/`signed_by`/`scheme` | EIP-191 `personal_sign` over RFC 8785 (JCS) canonical bytes of the `payload` sub-object *only*, Ethereum-address signer |
+| [`004-nsgoods-2026-09-08.json`](attestations/004-nsgoods-2026-09-08.json), [`005-nsgoods-2026-09-13.json`](attestations/005-nsgoods-2026-09-13.json) | No `proof` object — `payload` is a top-level sibling of `signature`/`jcs_sha256`/`jcs_len`/`signed_by`/`scheme` | EIP-191 `personal_sign` over RFC 8785 (JCS) canonical bytes of the `payload` sub-object *only*, Ethereum-address signer |
+
+`005` uses the same construction as `004`, so the count of constructions is
+still three even though there are now five files. What changed between them is
+the *description*: `004`'s `scheme` string names the whole file and is
+imprecise; `005`'s names the `payload` sub-object and is accurate. See "`005`'s
+`scheme` string is accurate" below.
 
 All three constructions are hard to get right from the spec alone; all
-three are given in full below, plus — for the EIP-191 cases (`003`, `004`)
-only — a separate, required check of whether the signing key was actually
-*authorized* to make this kind of statement.
+three are given in full below, plus — for the EIP-191 cases (`003`, `004`,
+`005`) only — a separate, required check of whether the signing key was
+actually *authorized* to make this kind of statement.
 
 #### `JsonWebSignature2020` (001, 002)
 
@@ -662,6 +721,71 @@ second entry (alongside `003`'s) naming
 independent computation above — the signer's own published record agrees
 with what this repo can verify unilaterally.
 
+#### `005`'s `scheme` string is accurate — the ambiguity in `004` was not repeated
+
+`005` reuses `004`'s envelope exactly (`payload` sibling to `jcs_sha256`,
+`jcs_len`, `signature`, `signed_by`, `scheme`), so the construction above
+applies unchanged. Its `scheme` string, however, does not repeat `004`'s
+imprecision. It reads, in part:
+
+> EIP-191 `personal_sign` over the RFC8785/JCS canonicalization of the payload
+> sub-object ONLY (`json.dumps` sort_keys, separators `(',',':')`); signing
+> input = `keccak256("\x19Ethereum Signed Message:\n" + str(jcs_len) +
+> jcs_bytes)`, decimal-ASCII length; recover == `signed_by`
+
+Every element of that sentence was checked by execution against the committed
+file, and every element holds:
+
+- **Canonicalization target.** The `payload` sub-object alone canonicalizes to
+  exactly **841 bytes**, matching the declared `jcs_len`; their SHA-256 is
+  `ad63a636e8fabe78f06b6fdc879326af011a767df79dadf035c8bedb3af891cf`, matching
+  the declared `jcs_sha256`.
+- **Prefix and length encoding.** Applying
+  `keccak256("\x19Ethereum Signed Message:\n841" + canonical_bytes)` — decimal
+  ASCII, as in `003` and `004` — and recovering from `signature` yields
+  `0x57fF0F084Cba33e6761503f90eEF0Da9F159350c`, matching `signed_by`.
+- **The whole-file reading is excluded by test, not by argument.**
+  Canonicalizing the whole envelope recovers
+  `0x98A41998098640882e613c986a5D1c259820f67F`; canonicalizing the whole
+  envelope with only `signature` removed recovers
+  `0x13aC73C10b6a58f207c37508F2d6A81d7d727F46`. Neither is the declared signer.
+  `004`'s wording left a reader to *reason* their way out of the circular
+  reading; `005`'s wording simply does not create it.
+- **The stated canonicalizer is exact here.** `005` names `json.dumps` with
+  `sort_keys` and compact separators as its RFC 8785 stand-in. Those two
+  disagree in general — on number formatting and on non-ASCII escaping — but
+  `005`'s `payload` contains no numbers and only ASCII strings and booleans, so
+  the two produce identical bytes for this document. Verified rather than
+  assumed: the `ensure_ascii=True` and `ensure_ascii=False` serializations are
+  byte-equal here.
+
+**Reported both ways, as asked:** `004`'s scheme string was imprecise and the
+correction lives in the signer's manifest (next section); `005`'s is accurate as
+written and needs no correction.
+
+**The authority check, same as `003` and `004`:** fetched for this task, with
+the manifest's own `generated_at` at fetch time recorded as
+`2026-09-13T18:05:09.428930+00:00` (this document is regenerated in place, so a
+later fetch may show a different timestamp — everything stated here is stated
+about *that* revision).
+`signers["0x57fF0F084Cba33e6761503f90eEF0Da9F159350c"]` in
+`https://x402.nsgoods.org/proof/index.json` lists `"reproduction-attestations"`
+in its scope, and `signer_registry` gives that address `status: "active"` with
+`valid_until: null`. The manifest's `reproduction_attestations` array carries a
+third entry, naming `attestations/005-nsgoods-2026-09-13.json`, `signed_by`
+matching, and `jcs_sha256` matching the value computed independently above.
+Authorization was checked against the manifest **separately** from the
+signature — a valid signature from an unauthorized key would still not count.
+
+**References the attestation cites, confirmed to exist.** `005` cites no repo
+commit hash. It cites `verify.py --circuit solo`, which exists and accepts that
+flag, and the solo `vkHashFile` registered on Base Sepolia (84532), which
+`verify_onchain_quorum.py` reads live as
+`0x13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2` — the same
+value `005` reports. Its two digests were compared against this repo's own
+expected solo values in `verify.py` (`expected_vk_sha256`,
+`expected_vk_keccak256`), not against the README prose, and both match.
+
 #### The `scheme`/`signingScheme` wording in 003 and 004 is imprecise — files left unedited
 
 Every digest, address, and signature confirmed in the two sections above is
@@ -727,27 +851,51 @@ built as part of this task, per scope.
 
 ## Independent Reproductions
 
-3 of the target 3-5 independent tier-1 reproductions confirmed — Stage 1
-minimum threshold met, all 3 cryptographically signed and independently
-verified (`001`, `002`, `003`). A first independent tier-2
-(deployed-bytecode) reproduction has also been confirmed and signed (`004`,
-2026-09-08) — see "Two identifiers" above for what tier 1 and tier 2 each
-establish, and why they're counted separately. See `attestations/` for all
-records.
+**Batch circuit, tier 1:** 3 of the target 3-5 independent reproductions
+confirmed — Stage 1 minimum threshold met, all 3 cryptographically signed and
+independently verified (`001`, `002`, `003`).
+
+**Batch circuit, tier 2:** a first independent deployed-bytecode reproduction
+confirmed and signed (`004`, 2026-09-08).
+
+**Solo circuit, tier 1:** first independent reproduction confirmed and signed
+(`005`, 2026-09-13), plus a second, unsigned reproduction reported the same
+digests on different hardware. Solo's bundle was published on 2026-09-13 with
+zero third-party reproductions; both arrived within a day of it. Its tier 2
+remains at zero.
+
+See "Two identifiers" above for what tier 1 and tier 2 each establish and why
+they're counted separately, and "Solo — published, and now independently
+reproduced" below for what the two solo runs jointly demonstrate about
+determinism across architectures. See `attestations/` for all records; each file
+states its own circuit and tier, which is not inferable from the directory.
+
+The five files are digest-pinned in
+[`attestations/MANIFEST.sha256`](attestations/MANIFEST.sha256) — same
+convenience-pointer status as the two bundle manifests above (`shasum -a 256 -c`
+detects accidental corruption, not a determined edit; the signatures inside the
+files are the real integrity mechanism). That manifest's own bundle digest
+(`SHA256(attestations/MANIFEST.sha256)`):
+
+```
+4ca9c1cd4a9387aae42a0d38d53ea6d7cebfd2961ef64733a75b1bfe322aa60e
+```
 
 ## The public mirror stack — a quorum check anyone can run against public chain state
 
-Everything above (`verify.py`, `verify_deployment.py`, the four files under
+Everything above (`verify.py`, `verify_deployment.py`, the five files under
 `attestations/`) establishes reproducibility. It does not, by itself, let a
 reader confirm that the on-chain passport attestation this project actually
-uses reflects those four records rather than something else — that requires
+uses reflects those five records rather than something else — that requires
 reading live contract state and treating it with the same skepticism a
 client would, not taking this README's word for it. A second, fully
 self-consistent contract stack now exists on Base Sepolia for exactly that:
 deployed from a key with no relationship to this project's operational
 deployment, carrying byte-identical bytecode and the same `vk.key` for both
-circuits, so the four attestations resolve against it the same way they
-resolve against the deployment this project actually uses.
+circuits, so the four **batch** attestations resolve against it the same way
+they resolve against the deployment this project actually uses. The fifth
+record, `005`, covers solo and has not been filed on-chain at all — see "A
+signed file and an on-chain record are different things" below.
 
 **Two circuits are registered against this project's one model, and the
 check gives them opposite answers on the same deployment, with the same
@@ -757,21 +905,51 @@ client logic:**
 |---|---|---|
 | Verifier | `0x886b1baceB0552B2A4159663879b2841F3d81739` (same address as "Two identifiers" above) | `0x6D282dB5FE9833A6b5f995C5645188f2e4286e43` |
 | `vkHashFile` | `0xdd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f` | `0x13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2` |
-| `tier1Count` | **3** (`001`, `002`, `003` — all `pp-repro-v2`) | **0** |
+| `tier1Count` | **3** (`001`, `002`, `003` — all `pp-repro-v2`) | **0** — see "A signed file and an on-chain record are different things" directly below |
 | `avgScore` | 100 | 0 |
 | `bytecodeBindingVerified` | true | true — **see the trap below before reading this as partial credit** |
 | Tier-2 (`pp-bytecode-v1`) | 1 (`004`, nsgoods) | 0 |
 | `allowed` (quorum policy: ≥1 verified tier-1 record, avg score ≥51) | **true** | **false** |
 
-The batch row restates what "Independent Reproductions" above already says,
-now confirmed against a second, independently-deployed stack rather than
-only the deployment this repo's own scripts point at. The solo row is new
-information: **nobody has ever reproduced the solo circuit's `vk.key`.**
-Zero third parties, zero tier-1 records, zero tier-2 records. This is not a
-gap in this particular check — it is the true, current state of that
-circuit, on both the operational deployment and this public mirror,
-independently. A page that reported only the batch row would be exactly the
-kind of partial claim this repo exists to correct.
+Values above are from a live run on **2026-09-14**, after `005` was verified and
+committed. The batch row restates what "Independent Reproductions" above already
+says, now confirmed against a second, independently-deployed stack rather than
+only the deployment this repo's own scripts point at.
+
+#### A signed file and an on-chain record are different things
+
+The solo row says `tier1Count = 0`, and that is still the correct output as of
+this run — but the sentence this README previously attached to it, "nobody has
+ever reproduced the solo circuit's `vk.key`," is **no longer true and has been
+removed.** Someone has: `attestations/005-nsgoods-2026-09-13.json`, signed,
+verified by execution on this side, digests matching `verify.py`'s expected solo
+values exactly.
+
+What `tier1Count = 0` reports is a narrower and still-accurate fact: **no
+tier-1 record for solo has been filed on-chain.** The script resolves a
+`requestHash` per (attester, tag, circuit) triple against the validation
+registry; for solo, all three attesters come back `not_resolved_onchain` under
+both tags. Nothing has been written to the registry for solo, so there is
+nothing for the script to fetch, verify, or count. Filing is a separate act from
+signing, performed by a different party (the registrar), and it has not
+happened yet for `005`.
+
+So the two statements that are both true right now:
+
+- **Off-chain:** solo has one signed, independently verified tier-1
+  reproduction, and one further unsigned one. The evidence exists and anyone can
+  check it from `attestations/` plus the signer's own published copy.
+- **On-chain:** solo has zero tier-1 records, `avgScore` 0, and `allowed` is
+  `false`. A client running the quorum policy against the mirror today would
+  still decline solo.
+
+Neither figure is a stand-in for the other, and this README will not report the
+signed file as though it moved the on-chain number. The solo row will change
+when, and only when, a record is actually filed.
+
+A page that reported only the batch row — or that quietly upgraded the solo row
+because a signature now exists off-chain — would be exactly the kind of partial
+claim this repo exists to correct.
 
 ### The `bytecodeBindingVerified` trap
 
@@ -904,28 +1082,51 @@ All on Base Sepolia, chainId `84532`. Only the addresses `verify_onchain_quorum.
 actually needs are published here — nothing from the operational deployment
 appears anywhere in this repo.
 
-### Solo — now published, still unattested
+### Solo — published, and now independently reproduced
 
 If you've already run the batch reproduction bundle (`verify.py`), solo is
 close to free by comparison. The batch `srs.bin` in this repo is
 67,109,124 bytes; the solo circuit's own `srs.bin` is 8,388,868 bytes —
 about 8× smaller, with proportionally smaller `setup()` memory and time
-(measured this release: ≈2.3s wall-clock, ≈1.5 GB peak RSS — see "Solo
-bundle" above). Solo's artifacts are now published, in `solo/` — see "Solo
-bundle" above for the files, digests, and `verify.py --circuit solo`.
+(measured across three hosts: ≈1.8–14.5s wall-clock, ≈0.96–1.55 GB peak RSS —
+see "Cost: three measured hosts, one `vk.key`" above). Solo's artifacts are
+published in `solo/` — see "Solo bundle" above for the files, digests, and
+`verify.py --circuit solo`.
 
-Publishing the bundle changes what a third party *can* do, not what anyone
-has done: the circuit, its `vkHashFile`, and its `vkHashBytecode` are live
-on both the operational and public-mirror deployments, and
-`verify_onchain_quorum.py` above already checks solo the same way it checks
-batch (same client logic, no separate code path) — run live against the
-public mirror for this release, it still reports exactly what the table
-above shows: **zero** third-party reproductions of any kind for solo, zero
-tier-1 records, zero tier-2 records. That's the true, current state, not a
-default or a placeholder the script falls back to. The smallest
-reproduction this project can currently ask for is exactly this one, and it
-is now something a third party can actually go do from published bytes
-instead of only from a description of what solo is.
+**It took less than a day.** The bundle was published on 2026-09-13 with zero
+third-party reproductions of any kind. Two arrived within a day, on different
+architectures, by different paths:
+
+- an Apple Silicon host, Python 3.13.6, ≈3.13s and ≈1.37 GB peak RSS — reported
+  unsigned;
+- a 2-core x86 cloud VM, Python 3.13.15, which dropped its network namespace
+  (`unshare -n`) for the compute and derived the digest **three ways** — the
+  reproducer's own driver, a manual re-hash, and this repo's
+  `verify.py --circuit solo`, the last of these only after their own driver had
+  already produced the value — ≈14.5s and ≈957 MB peak RSS, signed as
+  [`attestations/005-nsgoods-2026-09-13.json`](attestations/005-nsgoods-2026-09-13.json).
+
+The ordering in the second one matters: the independent driver produced
+`13cff042…4ff2` *before* this repo's script was ever run, so the agreement is
+not an artifact of running the maintainer's code and trusting its output. The
+network namespace was dropped during compute, so nothing was fetched mid-run.
+
+**What the pair establishes that a count of signatures would not.** Both runs,
+and this repo's own, land on a `vk.key` of exactly **157,511 bytes** with
+identical `sha256` and `keccak256`, while wall-clock differs by roughly **6×**
+and peak RSS by about **400 MB**. Two signatures from one architecture would
+have established that two parties ran the same steps. Two reproductions across
+two architectures, two interpreter patch versions, and a 400 MB spread in memory
+pressure establish something harder: that the digest does not depend on the
+machine. That is determinism demonstrated, not asserted — and it is why the
+memory figure quoted anywhere in this README is presented as a measured range
+with its hosts named rather than as a requirement.
+
+**Tier 2 for solo remains at zero,** and nothing above changes that. So does the
+on-chain count: `005` is a signed file, not a filed record — see "A signed file
+and an on-chain record are different things" above for why
+`verify_onchain_quorum.py` still reports `tier1Count = 0` for solo, and what
+would change it.
 
 ## What changed — 2026-09-08
 
@@ -996,14 +1197,72 @@ carried as the solo circuit's `vkHashFile` since that stack existed.
 behavior is unchanged. `verify_onchain_quorum.py` needed no code changes —
 it already checks both circuits generically from on-chain state, for every
 prior release — this release only re-ran it live to confirm the solo path
-resolves genuinely rather than defaulting to zero (see "Solo — now
-published, still unattested" above).
+resolves genuinely rather than defaulting to zero (see "Solo — published, and
+now independently reproduced" above).
 
 Also added: a note correcting the `scheme`/`signingScheme` wording in
 `attestations/003` and `attestations/004` (see "Verifying a signed
 attestation's proof" above). The attestation files themselves are
 unedited — the correction lives in the signer's own manifest and is now
 cross-referenced here.
+
+## What changed — 2026-09-14
+
+**The solo circuit is no longer unreproduced.** Within a day of its bundle being
+published, two independent tier-1 reproductions arrived. The signed one is now
+committed as `attestations/005-nsgoods-2026-09-13.json`, byte-identical to the
+bytes published at
+`https://x402.nsgoods.org/proof/reproductions/005-nsgoods-2026-09-13.json`,
+since its own signature covers exactly those bytes.
+
+**What was checked before accepting it.** Both digests against `verify.py`'s own
+expected solo values (not against README prose) — match. The signature, by
+canonicalizing the `payload` sub-object per RFC 8785, applying the EIP-191
+prefix with the decimal-ASCII length, and recovering the signer — recovers
+`0x57fF0F084Cba33e6761503f90eEF0Da9F159350c`, matching `signed_by`; two
+whole-file readings were tested and recover different addresses. The signer's
+authorization, separately, against the published manifest (`generated_at` at
+fetch time: `2026-09-13T18:05:09.428930+00:00`). The references `005` cites — it
+names no commit hash; `verify.py --circuit solo` exists, and the solo
+`vkHashFile` it cites is what a live on-chain read returns. Details in "`005`'s
+`scheme` string is accurate" above.
+
+**`005`'s `scheme` string is accurate, unlike `004`'s.** `004`'s named the whole
+file as the canonicalization target, a reading that is circular and was
+corrected in the signer's manifest rather than by re-signing. `005` names the
+`payload` sub-object explicitly, states the length encoding, and is correct as
+written. Reported here both ways, as it should be.
+
+**Cross-host determinism, which is the stronger result.** The two reproductions
+ran on different architectures by different paths and produced a byte-identical
+157,511-byte `vk.key`: Apple Silicon / Python 3.13.6 at ≈3.13s and ≈1.37 GB
+peak, and a 2-core x86 cloud VM / Python 3.13.15 at ≈14.5s and ≈957 MB peak,
+network namespace dropped during compute, digest derived three ways with this
+repo's `verify.py` touched last. Roughly 6× apart in wall-clock and about 400 MB
+apart in peak memory, identical in output. Every solo memory and timing figure
+in this README is now presented as a measured range with its hosts named, since
+the previous single figure was host-specific — see "Cost: three measured hosts,
+one `vk.key`" above.
+
+**The on-chain count did not move, and is not reported as though it did.** A
+live run of `verify_onchain_quorum.py` on 2026-09-14 still returns
+`tier1Count = 0`, `avgScore = 0`, `allowed = false` for solo: all three
+attesters resolve `not_resolved_onchain` under both tags. `005` is a signed
+file; filing a record on-chain is a separate act by the registrar and has not
+happened. Batch is unchanged at `tier1Count = 3`, `avgScore = 100`,
+`allowed = true`, with one tier-2 record.
+
+**`attestations/` now has an integrity file — a new one.** No manifest covered
+that directory before this change, unlike the batch and solo bundles;
+`attestations/MANIFEST.sha256` was created here rather than updated, pinning all
+five records. Like the other two manifests it is a convenience pointer, not the
+integrity mechanism — the signatures inside the files are that.
+
+**The Docker path stays open.** Both reproductions were native, so neither
+exercised the container. See "Docker verification status" above for what would
+close it: wall-clock and peak *container* memory for each circuit, plus
+confirmation that each run lands on its canonical digest. One of the `005`
+reproducers has offered to run it on a throwaway host.
 
 ## Scope
 

@@ -1,0 +1,20 @@
+{
+  "payload": {
+    "reproducer": "nsgoods (nsgoods.org)",
+    "date": "2026-09-13T17:47:11+00:00",
+    "circuit": "solo",
+    "ezkl_version": "23.0.5",
+    "verification_scope": "full",
+    "computed_vk_digest": {
+      "sha256": "32439290a76c2ef71fb6f20ef203b001b54d9835b411554bae827df5364e9523",
+      "keccak256": "13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2"
+    },
+    "matches_expected_digest": true,
+    "notes": "First independent reproduction of the solo circuit vk.key (batch_size 1). Disposable 2c/8GB x86 host (Hetzner), Python 3.13.15, ezkl 23.0.5, network-isolated compute (unshare -n). Reproduced with our own driver and cross-checked against the repo's verify.py --circuit solo; both plus a manual re-hash yield keccak256 0x13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2 == the solo vkHashFile registered on Base Sepolia (84532). Measured wall 14.5s, peak RSS 957MB."
+  },
+  "jcs_sha256": "ad63a636e8fabe78f06b6fdc879326af011a767df79dadf035c8bedb3af891cf",
+  "jcs_len": 841,
+  "signature": "0x0c544c765f8fa0151e6d310f68140d50716f265cacd4be1817c09b5a5b1be66c0c33173486a0f9071fc23443170cedb3dab9c6ae389c1fd8d2e913d3d5b8840c1c",
+  "signed_by": "0x57fF0F084Cba33e6761503f90eEF0Da9F159350c",
+  "scheme": "EIP-191 personal_sign over the RFC8785/JCS canonicalization of the payload sub-object ONLY (json.dumps sort_keys, separators (',',':')); signing input = keccak256(\"\\x19Ethereum Signed Message:\\n\" + str(jcs_len) + jcs_bytes), decimal-ASCII length; recover == signed_by (0x57fF0F084Cba33e6761503f90eEF0Da9F159350c). Authority: signers[signed_by] scope includes reproduction-attestations at https://x402.nsgoods.org/proof/index.json"
+}
