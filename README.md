@@ -1057,15 +1057,23 @@ live chain state:
 python3 verify_doc_field_regressions.py
 ```
 
-No extra dependencies — it imports `verify_onchain_quorum.py` directly and
-otherwise uses only the Python standard library and this repo's own
-`attestations/*.json` files. It protects against the shape-agnostic
-`doc_field()` accessor's root/payload fallback being silently reintroduced:
-an attestation document's EIP-191 signature covers its `payload` only, so a
-version of `doc_field()` that falls back to reading an unsigned root-level
-copy of a field can be satisfied by content nobody actually signed. This
-script's `CASE_ROOT_ONLY_FORGERY_REJECTED` case constructs exactly that
-document and asserts it is refused, alongside the rest of the matrix
+No extra dependencies beyond what `verify_onchain_quorum.py` already needs —
+it imports that module directly, plus `eth_account` (already a hard
+dependency, used here only to generate and sign with a throwaway keypair)
+and this repo's own `attestations/*.json` files. It protects against the
+shape-agnostic `doc_field()` accessor's root/payload fallback being silently
+reintroduced: an attestation document's EIP-191 signature covers its
+`payload` only, so a version of `doc_field()` that falls back to reading an
+unsigned root-level copy of a field can be satisfied by content nobody
+actually signed. Two cases cover this, deliberately kept separate:
+`CASE_ROOT_ONLY_FORGERY_REJECTED_SHAPE_ONLY` constructs a document that
+merely carries the right keys for a real record (`payload`, `signature`,
+`signed_by`); `CASE_ROOT_ONLY_FORGERY_REJECTED_GENUINE_SIGNATURE` goes
+further — it generates a throwaway keypair, signs a payload that genuinely
+lacks the field with the same EIP-191 construction real attestations use,
+confirms that signature genuinely verifies, and only then checks that the
+content check still refuses the forged root value. Both assert the document
+is refused, alongside the rest of the matrix
 (missing/malformed/conflicting fields, both document shapes, an unrecognized
 shape, and all five real attestation files).
 

@@ -25,18 +25,31 @@ something that runs, not just assumed to still work because they worked once.
 This protects against the fallback being reintroduced silently. Someone
 simplifying `doc_field()` back down to "payload, else root" in six months
 would break nothing visible in a normal run against real records (none of
-the five currently conflict) — this script is what would catch it, because
-CASE_ROOT_ONLY_FORGERY_REJECTED below constructs the exact document shape
-that fallback would wrongly accept.
+the five currently conflict) — this script is what would catch it. Two
+cases cover the forged-root condition, deliberately kept separate because
+they test different things: CASE_ROOT_ONLY_FORGERY_REJECTED_SHAPE_ONLY
+constructs a document that merely carries the right keys (`payload`,
+`signature`, `signed_by`) with the field absent from payload and present at
+root, checking field-selection behaviour in isolation.
+CASE_ROOT_ONLY_FORGERY_REJECTED_GENUINE_SIGNATURE goes further: it generates
+a throwaway keypair, signs a payload that genuinely lacks the field with the
+same EIP-191 construction the real attestations use, confirms that signature
+genuinely verifies, and only then checks that the content check still
+refuses the forged root value — proving the property that actually matters,
+that a valid signature over incomplete content can't become a passing
+content check.
 
 No test framework and no test-directory convention — this repo has neither,
 and none is introduced here. This script imports verify_onchain_quorum.py
 directly (by file path, so it runs from any working directory) and uses only
-the Python standard library plus this repo's own `attestations/*.json`
-files; no dependency beyond what verify_onchain_quorum.py itself already
-needs (nothing extra to install for this script specifically). Every
-synthetic fixture is a Python literal inlined below, not a loose file, so
-the script cannot silently pass because a fixture went missing.
+the Python standard library, `eth_account` (already a hard dependency of
+verify_onchain_quorum.py, used here only to generate and sign with a
+throwaway keypair — never a key with any real-world meaning), and this
+repo's own `attestations/*.json` files; no dependency beyond what
+verify_onchain_quorum.py itself already needs (nothing extra to install for
+this script specifically). Every synthetic fixture is a Python literal
+inlined below, not a loose file, so the script cannot silently pass because
+a fixture went missing.
 
 Usage:
     python3 verify_doc_field_regressions.py
@@ -138,16 +151,24 @@ def main() -> int:
     check("payload key present but None -> unrecognized_shape", status == "unrecognized_shape")
 
     # ------------------------------------------------------------------
-    # KEPT CASE, requested explicitly by the reviewer: a validly-"signed"
-    # envelope document (carries signature/signed_by, i.e. shaped exactly
-    # like a real record that would pass verifyAttestationDocument) with the
-    # required field absent from its signed payload and present, instead, at
-    # the unsigned root. This is the exact document the pre-hardening
-    # doc_field() would have accepted, reading the forged root value as if
-    # it were verified content. It must be refused as unverifiable, not
-    # silently resolved from the root.
+    # KEPT CASE, requested explicitly by a reviewer: a signature-SHAPED
+    # envelope document (carries signature/signed_by keys, so it has the
+    # right fields for a real record) with the required field absent from
+    # its payload and present, instead, at the unsigned root. This
+    # establishes field-selection behaviour on its own -- it does not check
+    # that the signature is cryptographically real, only that the reader
+    # doesn't fall back to the root when it sees those keys. It must be
+    # refused as unverifiable, not silently resolved from the root.
+    #
+    # A second reviewer correctly pointed out that this alone doesn't prove
+    # the full path: it doesn't show a genuinely valid signature over
+    # genuinely incomplete content still failing the content check. See
+    # CASE_ROOT_ONLY_FORGERY_REJECTED_GENUINE_SIGNATURE below for that --
+    # both cases are kept, because they test different things: this one
+    # tests field selection given the right shape; that one tests the
+    # signature-verification-to-content-check path end to end.
     # ------------------------------------------------------------------
-    print("\n=== CASE_ROOT_ONLY_FORGERY_REJECTED: signed envelope, field absent from payload, present (unsigned) at root ===")
+    print("\n=== CASE_ROOT_ONLY_FORGERY_REJECTED_SHAPE_ONLY: signature-shaped envelope, field absent from payload, present (unsigned) at root ===")
     forged_root_doc = {
         "payload": {},  # the field this check needs is NOT here
         "signature": "0xforgedsignatureplaceholder",
@@ -156,7 +177,7 @@ def main() -> int:
     }
     status, value, detail = voq.doc_field(forged_root_doc, BYTECODE_FILE_PATH)
     check(
-        "CASE_ROOT_ONLY_FORGERY_REJECTED: root-only value in a signature-shaped envelope doc is refused, not accepted",
+        "CASE_ROOT_ONLY_FORGERY_REJECTED_SHAPE_ONLY: root-only value in a signature-shaped envelope doc is refused, not accepted",
         status == "missing" and value is None,
         f"got status={status!r} value={value!r} detail={detail!r} (a FAIL here means the root fallback has been reintroduced)",
     )
@@ -172,9 +193,60 @@ def main() -> int:
     }
     status, value, detail = voq.doc_field_any(forged_root_doc_repro, REPRO_PATHS)
     check(
-        "CASE_ROOT_ONLY_FORGERY_REJECTED (pp-repro-v2, via doc_field_any): root-only digest in a signature-shaped envelope doc is refused",
+        "CASE_ROOT_ONLY_FORGERY_REJECTED_SHAPE_ONLY (pp-repro-v2, via doc_field_any): root-only digest in a signature-shaped envelope doc is refused",
         status == "missing" and value is None,
         f"got status={status!r} value={value!r} detail={detail!r}",
+    )
+
+    # ------------------------------------------------------------------
+    # CASE_ROOT_ONLY_FORGERY_REJECTED_GENUINE_SIGNATURE: the full path, not
+    # just the shape. Generates a throwaway keypair, builds a payload that
+    # genuinely lacks the target field, canonicalizes and signs that payload
+    # with the SAME EIP-191 construction the real attestations use
+    # (`canonicalize()` + `encode_defunct` + personal_sign, exactly what
+    # `verify_eip191_envelope()` checks against), and sets `signed_by` to the
+    # address that signature actually recovers to. A forged value for the
+    # target field is then placed at the document root -- outside the signed
+    # payload, so the signature says nothing about it.
+    #
+    # This is not a synthetic shape anymore: `voq.verify_attestation_document`
+    # (the exact dispatcher the live script calls) genuinely verifies this
+    # signature, over genuinely incomplete content, recovering the throwaway
+    # address. The property under test is that a real, valid signature over
+    # incomplete content must not become a passing content check merely
+    # because the missing piece can be found somewhere else in the document.
+    # ------------------------------------------------------------------
+    print("\n=== CASE_ROOT_ONLY_FORGERY_REJECTED_GENUINE_SIGNATURE: cryptographically valid EIP-191 signature over a payload genuinely missing the field, forged value at the unsigned root ===")
+    throwaway = voq.Account.create()
+    genuine_payload = {
+        "reproducer": "verify_doc_field_regressions.py fixture",
+        "note": "vkHash_file is intentionally absent from this payload - it is signed as-is",
+    }
+    payload_bytes = voq.canonicalize(genuine_payload)
+    signed_message = voq.Account.sign_message(voq.encode_defunct(primitive=payload_bytes), private_key=throwaway.key)
+    signature_hex = signed_message.signature.hex()
+    if not signature_hex.startswith("0x"):
+        signature_hex = "0x" + signature_hex
+
+    genuinely_signed_forged_root_doc = {
+        "payload": genuine_payload,
+        "signature": signature_hex,
+        "signed_by": throwaway.address,
+        "vkHash_file": "ROOT_ONLY_UNSIGNED_VALUE_UNDER_GENUINE_SIGNATURE",  # attacker-controlled, outside the signed payload
+    }
+
+    recovered, sig_err = voq.verify_attestation_document(genuinely_signed_forged_root_doc)
+    check(
+        "GENUINE_SIGNATURE precondition: the signature over the incomplete payload genuinely verifies, recovering the throwaway address",
+        sig_err is None and recovered is not None and recovered.lower() == throwaway.address.lower(),
+        f"got recovered={recovered!r} err={sig_err!r} (if this fails, the case below proves nothing - the signature itself isn't valid)",
+    )
+
+    status, value, detail = voq.doc_field(genuinely_signed_forged_root_doc, BYTECODE_FILE_PATH)
+    check(
+        "CASE_ROOT_ONLY_FORGERY_REJECTED_GENUINE_SIGNATURE: content check still refuses despite a genuinely valid signature, because the field is absent from the signed payload",
+        status == "missing" and value is None,
+        f"got status={status!r} value={value!r} detail={detail!r} (a FAIL here means a valid signature over incomplete content became a passing content check)",
     )
 
     # ------------------------------------------------------------------
