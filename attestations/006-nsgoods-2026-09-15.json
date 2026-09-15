@@ -1,0 +1,58 @@
+{
+  "payload": {
+    "reproducer": "nsgoods (nsgoods.org)",
+    "date": "2026-09-15T15:27:49+00:00",
+    "kind": "docker-container-measured-reproduction",
+    "repo": "github.com/achemperety/exactzk-mnistmlp-provenance-demo",
+    "commit": "dba5a975319e01ecc254e2b0395c5cb49c827ac3",
+    "image": "FROM --platform=linux/amd64 python:3.11-slim@sha256:d1053354624536b044162aaab1e418bd000ea35184fb1ae098ab3166b1072e72",
+    "ezkl_version": "23.0.5",
+    "verification_scope": "full",
+    "host": {
+      "provider": "Hetzner (disposable, deleted after run)",
+      "type": "ccx23",
+      "vcpu": 4,
+      "ram_gib": 15,
+      "arch": "x86_64",
+      "os": "Ubuntu 24.04",
+      "docker": "29.1.3",
+      "cgroup": "v2"
+    },
+    "measurement_basis": "cgroup v2 memory.peak of the container's own scope, read via /proc/<pid>/cgroup, polled until exit; wall clock around docker run to exit; no --memory flag (measured usage, not behaviour under a cap)",
+    "measured_at": "2026-09-14",
+    "runs": [
+      {
+        "circuit": "solo",
+        "exit_code": 0,
+        "wall_s": 9.07,
+        "peak_container_mem_gib": 1.426,
+        "computed_vk_digest": {
+          "sha256": "32439290a76c2ef71fb6f20ef203b001b54d9835b411554bae827df5364e9523",
+          "keccak256": "13cff0426abe00c941934bdd6bb7757f2e703fb9f6862bf08a783eeca08b4ff2"
+        },
+        "matches_expected_digest": true
+      },
+      {
+        "circuit": "batch",
+        "exit_code": 0,
+        "wall_s": 72.2,
+        "peak_container_mem_gib": 11.052,
+        "computed_vk_digest": {
+          "sha256": "1ed847e127419bc1d7db2a22779f75284975bf1908b33a43486ca9070e4ef627",
+          "keccak256": "dd03fb0c69e96cc02cbcc6bed8ef51665f934c01cddaf2a855bd1c7fce94675f"
+        },
+        "matches_expected_digest": true
+      }
+    ],
+    "scope_notes": [
+      "Native amd64 only: x86 host, so the linux/amd64 platform path ran natively; the arm64-host-to-amd64-image emulation path was not exercised.",
+      "No artificial memory limit: docker run had no --memory flag; peak figures are measured usage, not behaviour under a cap."
+    ],
+    "notes": "Both circuits built from the content-pinned image at commit dba5a975 and run via the documented verify.py entrypoint with --circuit selected at run time; all pinned input digests checked OK inside the container; each printed digest matched its canonical value. Batch container peak of ~11.05 GiB exceeds the ~8 GB previously estimated in the README."
+  },
+  "jcs_sha256": "0589e6ef5e5c49ff9a0d44c4582d4a2589a7ff6d2ce4a403a585dc5bbc539b40",
+  "jcs_len": 2058,
+  "signature": "0xe289d007f657476e686f0b473c97aedbc18b0058fd9bd17d9d7092b54f31c03244eef41b6fe4f22a5185c36af561188760b7823848d0e19686159e02956dda3a1c",
+  "signed_by": "0x57fF0F084Cba33e6761503f90eEF0Da9F159350c",
+  "scheme": "EIP-191 personal_sign over the RFC8785/JCS canonicalization of the payload sub-object ONLY (json.dumps sort_keys, separators (',',':')); signing input = keccak256(\"\\x19Ethereum Signed Message:\\n\" + str(jcs_len) + jcs_bytes), decimal-ASCII length; recover == signed_by (0x57fF0F084Cba33e6761503f90eEF0Da9F159350c). Authority: signers[signed_by] scope includes reproduction-attestations at https://x402.nsgoods.org/proof/index.json"
+}
