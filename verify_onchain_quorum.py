@@ -501,12 +501,45 @@ def check_circuit(w3, escrow, anchor, registry, chain_id, circuit_label, verifie
     }
 
 
+# --- Shape-agnostic content-field access ---
+#
+# Attestation documents exist in two shapes: flat (001-003 -- the field sits
+# at the document root) and EIP-191 payload envelope (004, 005 -- the field
+# sits one level down, under doc["payload"], beside signature/signed_by).
+# doc_field() is the one place every content check reads through, instead of
+# each check hardcoding its own doc.get("payload", doc)-style fallback.
+#
+# Before this: content_check_bytecode already had a payload fallback (added
+# when 004, the first envelope-shaped record, was filed under that tag);
+# content_check_repro did not, because its three prior records (001-003) all
+# predate the envelope shape -- nothing had ever exercised a pp-repro-v2
+# record in envelope shape until 005. That gap meant this script reported
+# tier1Count=0 for solo even after 005 was filed on-chain and resolved
+# correctly: the requestHash resolved, the signature verified, and the
+# content check still failed closed because it only ever looked at the
+# document root. Routing both checks through one accessor means a third tag
+# introduced in either shape only has to name its field path, not re-derive
+# the shape fallback -- the same fix already made in this project's
+# TypeScript client (client/src/passportV2.ts, docField()).
+def doc_field(doc, path):
+    def walk(root):
+        cur = root
+        for key in path:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(key)
+        return cur
+
+    payload = doc.get("payload") if isinstance(doc, dict) else None
+    if payload is not None:
+        val = walk(payload)
+        if val is not None:
+            return val
+    return walk(doc)
+
+
 def content_check_repro(doc, expected_vk_hash_file):
-    claimed = None
-    if isinstance(doc.get("reproducedDigests"), dict):
-        claimed = doc["reproducedDigests"].get("keccak256")
-    elif isinstance(doc.get("computed_vk_digest"), dict):
-        claimed = doc["computed_vk_digest"].get("keccak256")
+    claimed = doc_field(doc, ["reproducedDigests", "keccak256"]) or doc_field(doc, ["computed_vk_digest", "keccak256"])
     if not claimed:
         return False, "document has neither reproducedDigests.keccak256 nor computed_vk_digest.keccak256"
     ok = claimed.lower().replace("0x", "") == expected_vk_hash_file.hex().lower()
@@ -514,9 +547,8 @@ def content_check_repro(doc, expected_vk_hash_file):
 
 
 def content_check_bytecode(doc, expected_vk_hash_file, expected_vk_hash_bytecode):
-    payload = doc.get("payload", doc)
-    claimed_file = payload.get("vkHash_file")
-    claimed_bytecode = payload.get("vkHash_bytecode")
+    claimed_file = doc_field(doc, ["vkHash_file"])
+    claimed_bytecode = doc_field(doc, ["vkHash_bytecode"])
     file_ok = bool(claimed_file) and claimed_file.lower().replace("0x", "") == expected_vk_hash_file.hex().lower()
     bc_ok = bool(claimed_bytecode) and claimed_bytecode.lower().replace("0x", "") == expected_vk_hash_bytecode.hex().lower()
     if not (file_ok and bc_ok):

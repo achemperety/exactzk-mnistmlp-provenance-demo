@@ -239,60 +239,74 @@ this runs under emulation (works, just slower to build/pull than native).
 The base image is `python:3.11-slim`, pinned by content digest.
 
 **Memory: scoped per circuit, not one blanket number.** The two circuits'
-requirements differ by roughly 5×, and applying batch's number to a solo run
-wastes most of an ~8 GB container allowance; applying solo's number to a
-batch run OOM-kills it.
+usage differs by roughly 8×, and applying batch's number to a solo run
+wastes most of a container's memory allowance; applying solo's number to a
+batch run OOM-kills it. **Batch needs meaningfully more than the ~8 GB this
+section previously estimated** — see "Docker verification status" below:
+measured peak is ~11.05 GiB, so an 8 GiB or 10 GiB `--memory` cap will
+OOM-kill `setup()`.
 
-| Circuit | Container memory |
+| Circuit | Container memory (measured) |
 |---|---|
-| batch (default) | at least ~8 GB, extrapolated from the native peak RSS above plus container overhead (Docker Desktop's default resource limits are usually sufficient on modern machines; increase if `setup()` gets OOM-killed) — **not independently measured through Docker itself, see below** |
-| solo (`--circuit solo`) | at least ~2 GB, extrapolated from the **highest** native peak RSS measured on any host so far (~1.55 GB) plus container/base-image overhead — the lowest measured host needed only ~957 MB, so ~2 GB is a ceiling to provision against, not a floor solo needs — **not independently measured through Docker itself, see below** |
+| batch (default) | **~11.05 GiB** peak (cgroup v2 `memory.peak` of the container's own scope; no memory limit was imposed on the run — this is measured usage, not behavior under a cap). Provision at least ~12 GiB; an 8 GiB or 10 GiB limit will OOM-kill `setup()` — see below for a run that did exactly that. |
+| solo (`--circuit solo`) | **~1.43 GiB** peak (same measurement basis). |
 
 ### Docker verification status
 
-**Not verified by an actual build+run as of this revision.** Docker was not
-available in the environment these Dockerfile and README changes were made
-in (`docker info` failed, and the local Docker Desktop install was
-incomplete — its app bundle pointed at an unmounted volume). The memory
-figures above are extrapolated from the native, non-Docker peak-RSS
-measurements elsewhere in this README, plus a margin for base-image and
-container overhead — **not measured inside a container**, and the wall-clock
-cost of `linux/amd64` emulation on non-x86 hosts (mentioned above) is
-entirely unmeasured for both circuits.
+**CLOSED, 2026-09-15 — measured build+run, both circuits.** A reproducer ran
+both circuits through the container on a disposable **4 vCPU / 15 GiB x86
+host, Ubuntu 24.04, Docker 29.1.3, cgroup v2**, against the content-pinned
+image at commit `dba5a975`, circuit selected at `docker run` time exactly as
+documented above (no image rebuild between circuits). Memory was read as
+**cgroup v2 `memory.peak` of the container's own scope** — not host RSS, and
+not a host-level tool guessing at a container's footprint from the outside:
 
-Before this bundle goes to reviewers, someone with a working Docker install
-needs to actually run:
+| Circuit | Wall-clock | Peak memory (cgroup v2 `memory.peak`) | `keccak256(vk.key)` | Result |
+|---|---|---|---|---|
+| solo (`--circuit solo`) | 9.07s | 1.43 GiB | `13cff042…4ff2` | matches — **PASS** |
+| batch (default) | 72.20s | 11.05 GiB | `dd03fb0c…675f` | matches — **PASS** |
 
-```bash
-docker build -t mnistmlp-repro .
-docker run --rm mnistmlp-repro                # confirm still reproduces batch's dd03fb0c…675f
-docker run --rm mnistmlp-repro --circuit solo # confirm now reproduces solo's 13cff042…4ff2
-```
+Both runs exited 0, all five pinned input digests checked OK inside the
+container, and each circuit's printed digest matched its canonical value
+exactly.
 
-and replace this section with the measured wall-clock and peak container
-memory for both. Until that happens, treat the Docker path as
-structurally updated (files copied, circuit selectable at `docker run`
-time) but **functionally unverified**.
+**Two scope notes carried over from the reporter, not dropped:**
 
-**The two solo reproductions of 2026-09-13 do not close this item.** Both were
-native runs — one on Apple Silicon, one on an x86 cloud host under
-`unshare -n` — so neither exercised the `Dockerfile`, the pinned
-`python:3.11-slim` base image, the `linux/amd64` emulation path, or a
-container memory limit. Reproducing `vk.key` natively and reproducing it
-through this image are different claims, and only the first now has
-third-party evidence. Note also the analogy this section used to draw is now
-spent: solo's `vk.key` digest *has* since been reproduced from scratch by a
-third party (`attestations/005-nsgoods-2026-09-13.json`); the Docker path is
-now the only item here still in the "structurally updated, functionally
-unverified" state.
+- **Native amd64 only.** The host was x86, so this exercised the
+  `--platform=linux/amd64` path natively — it did **not** exercise Docker's
+  `arm64`-host-to-`amd64`-image emulation path (relevant to anyone building
+  this image on Apple Silicon or another arm64 Docker host). That emulation
+  path's wall-clock cost remains entirely unmeasured; treat it as a separate,
+  still-open question, not closed by this measurement.
+- **No artificial limit was imposed.** `docker run` was not given a
+  `--memory` flag on this run, so the two peak figures above are **measured
+  usage**, not **behavior under a cap** — they say how much memory `setup()`
+  actually touches when nothing constrains it, not what happens (graceful
+  degradation vs. OOM-kill, timing under memory pressure) if a limit sits
+  below that peak. The paragraph below draws an inference from these usage
+  figures about one specific cap (10 GiB); it is not itself a second,
+  under-a-cap measurement.
 
-**What would close it, and who can.** One of the `005` reproducers has offered
-to run the container on a throwaway host. The item closes when someone
-publishes, for **each** circuit: wall-clock, peak **container** memory (not
-host RSS), and confirmation that the run printed the circuit's canonical
-digest — `dd03fb0c…675f` for batch, `13cff042…4ff2` for solo. Anything less
-than both circuits, or a host-RSS figure standing in for a container figure,
-leaves it open.
+**The 8 GB estimate this section previously carried was wrong, not just
+imprecise — this measurement is the explanation for an earlier failure, not
+merely an update to a number.** A previous reproducer's container run
+terminated against a 10 GiB memory gate, with the cause at the time recorded
+as unproven. Batch's actual peak — 11.05 GiB — is above that gate: an 8 GiB
+*or* a 10 GiB `--memory` limit both sit below what `setup()` needs, so
+either one OOM-kills batch's run partway through `setup()`. That is not a
+rounding error against the old ~8 GB estimate; it is a ~38% understatement
+that would leave anyone provisioning to the old number's guidance genuinely
+unable to complete a batch reproduction in Docker. Provision at least ~12
+GiB for batch; solo's ~1.43 GiB measured peak leaves the old ~2 GB estimate
+intact with headroom to spare.
+
+**The two native solo reproductions of 2026-09-13 did not close this item on
+their own** — see "Solo — published, and now independently reproduced"
+below — because neither exercised the `Dockerfile`, the pinned
+`python:3.11-slim` base image, the `linux/amd64` path, or a container memory
+limit. This measurement is what closes it: both circuits, built and run
+through the actual published image, each landing on its canonical digest,
+with real container memory figures replacing the extrapolated ones above.
 
 ## Reproduce — the second link (`verify_deployment.py`)
 
@@ -446,25 +460,36 @@ python3 verify.py --circuit solo
 
 #### Cost: three measured hosts, one `vk.key`
 
-These are measurements, not requirements. Solo's `vk.key` is **157,511 bytes**
-on every one of them, with the same `sha256` and the same `keccak256` — the
-length is not separately attested by each reproducer, it follows from the
-matching `sha256` over the whole file:
+These are measurements, not requirements — and, for the middle row below, a
+**single-run observation** rather than a controlled cross-host benchmark: none
+of these three runs were coordinated as one experiment: each reproducer ran
+their own driver, once, on whatever host they had. Solo's `vk.key` is
+**157,511 bytes** in this repo's own build and in `005`'s signed
+reproduction — both retained the generated file long enough to hash *and*
+report its size, so both corroborate the byte count directly. The middle row
+is **not** a third data point for that figure: that reproducer's script
+deletes the generated key on exit, so no size was retained or reported on
+their side, and the byte count above should not be read as corroborated by
+that run — only its digest match is (see "Solo — published, and now
+independently reproduced" below for what is and isn't claimed about that row).
 
 | Host | Interpreter | Wall-clock | Peak RSS | Source |
 |---|---|---|---|---|
 | Apple Silicon macOS, native | Python 3.13.6 | ≈1.8s | ≈1.55 GB | this repo, re-measured 2026-09-14 (the 2026-09-13 release recorded ≈2.3s / ≈1.5 GB on an Apple Silicon macOS host too) |
-| Apple Silicon, native | Python 3.13.6 | ≈3.13s | ≈1.37 GB | independent reproducer, unsigned report |
+| Apple Silicon, native | Python 3.13.6 | ≈3.13s | ≈1.37 GB | independent reproducer, unsigned, single-run observation (wall-clock/memory only — no file size retained, see above) |
 | 2-core x86 cloud VM, native, network namespace dropped (`unshare -n`) during compute | Python 3.13.15 | ≈14.5s | ≈957 MB | [`005-nsgoods-2026-09-13.json`](attestations/005-nsgoods-2026-09-13.json), signed |
 
-**The spread is the point.** Wall-clock differs by roughly **6×** across these
-hosts and peak RSS by about **400 MB** — and the output is byte-identical
-anyway. That is determinism *demonstrated across architectures*, not asserted:
-if the digest tracked anything host-specific — instruction set, core count,
-interpreter patch version, allocator behaviour that peaked at 957 MB on one host
-and 1.55 GB on another — these three runs would have diverged. They did not.
-This is a stronger statement than two signatures on one architecture would have
-been.
+**The spread is informative, without over-reading it as a controlled
+benchmark.** Wall-clock differs by roughly **6×** across these hosts and peak
+RSS by about **400 MB** — and the digest each run reports is identical
+regardless. Three single-run observations on three hosts are reproduction
+across the environments actually tested, not a general guarantee that the
+digest is architecture-independent everywhere — three points bound a
+property, they don't establish it universally. What they do rule out is the
+narrower, already-useful claim that *these specific* memory/timing profiles
+were required for a correct run: none of instruction set, core count,
+interpreter patch version, or the RSS spread itself (957 MB to 1.55 GB)
+changed the output on any of the three hosts actually tried.
 
 It also means **any single memory number here is host-specific.** Provision
 against the range, not against one figure; ~957 MB was sufficient on the
@@ -866,9 +891,10 @@ remains at zero.
 
 See "Two identifiers" above for what tier 1 and tier 2 each establish and why
 they're counted separately, and "Solo — published, and now independently
-reproduced" below for what the two solo runs jointly demonstrate about
-determinism across architectures. See `attestations/` for all records; each file
-states its own circuit and tier, which is not inferable from the directory.
+reproduced" below for what the two solo runs establish about reproduction
+across the two environments actually tested. See `attestations/` for all
+records; each file states its own circuit and tier, which is not inferable
+from the directory.
 
 The five files are digest-pinned in
 [`attestations/MANIFEST.sha256`](attestations/MANIFEST.sha256) — same
@@ -1095,10 +1121,17 @@ published in `solo/` — see "Solo bundle" above for the files, digests, and
 
 **It took less than a day.** The bundle was published on 2026-09-13 with zero
 third-party reproductions of any kind. Two arrived within a day, on different
-architectures, by different paths:
+architectures, by different paths — the first a single-run observation, the
+second a signed, retained artifact:
 
-- an Apple Silicon host, Python 3.13.6, ≈3.13s and ≈1.37 GB peak RSS — reported
-  unsigned;
+- an Apple Silicon host, Python 3.13.6, ≈3.13s and ≈1.37 GB peak RSS —
+  reported unsigned, a **single-run observation** (one run, one host, not a
+  controlled cross-host benchmark and not a stated resource requirement).
+  That reproducer's script deletes the generated `vk.key` on exit, so no
+  file size was retained or reported on their side — their report is
+  wall-clock and peak memory only, plus a matching digest; **the 157,511-byte
+  figure quoted elsewhere in this README is not corroborated by this run**
+  and should not be read as though it were;
 - a 2-core x86 cloud VM, Python 3.13.15, which dropped its network namespace
   (`unshare -n`) for the compute and derived the digest **three ways** — the
   reproducer's own driver, a manual re-hash, and this repo's
@@ -1111,16 +1144,23 @@ The ordering in the second one matters: the independent driver produced
 not an artifact of running the maintainer's code and trusting its output. The
 network namespace was dropped during compute, so nothing was fetched mid-run.
 
-**What the pair establishes that a count of signatures would not.** Both runs,
-and this repo's own, land on a `vk.key` of exactly **157,511 bytes** with
-identical `sha256` and `keccak256`, while wall-clock differs by roughly **6×**
-and peak RSS by about **400 MB**. Two signatures from one architecture would
-have established that two parties ran the same steps. Two reproductions across
-two architectures, two interpreter patch versions, and a 400 MB spread in memory
-pressure establish something harder: that the digest does not depend on the
-machine. That is determinism demonstrated, not asserted — and it is why the
-memory figure quoted anywhere in this README is presented as a measured range
-with its hosts named rather than as a requirement.
+**What the pair establishes, stated at the scope it actually supports.** This
+repo's own build and `005`'s signed reproduction land on a `vk.key` of
+exactly **157,511 bytes** with identical `sha256` and `keccak256`; the
+unsigned run's digest also matches, though its byte count was never reported
+(see above) and isn't claimed as a third confirmation of the size. Across all
+three, wall-clock differs by roughly **6×** and peak RSS by about **400 MB**,
+with identical output regardless. Two signatures from one architecture would
+have established that two parties ran the same steps on the same kind of
+machine. What these establish is narrower than "the digest is
+architecture-independent" as a general property — three single-run
+observations, on three hosts, can't establish a universal claim like that —
+but it is still a real result: **reproduction across the environments
+actually tested**, spanning two architectures, two interpreter patch
+versions, and a 400 MB memory spread, with no divergence in output on any of
+them. That is why the memory figure quoted anywhere in this README is
+presented as a measured range with its hosts named, scoped to those hosts,
+rather than as a requirement or a guarantee beyond them.
 
 **Tier 2 for solo remains at zero,** and nothing above changes that. So does the
 on-chain count: `005` is a signed file, not a filed record — see "A signed file
@@ -1233,16 +1273,25 @@ corrected in the signer's manifest rather than by re-signing. `005` names the
 `payload` sub-object explicitly, states the length encoding, and is correct as
 written. Reported here both ways, as it should be.
 
-**Cross-host determinism, which is the stronger result.** The two reproductions
-ran on different architectures by different paths and produced a byte-identical
-157,511-byte `vk.key`: Apple Silicon / Python 3.13.6 at ≈3.13s and ≈1.37 GB
-peak, and a 2-core x86 cloud VM / Python 3.13.15 at ≈14.5s and ≈957 MB peak,
-network namespace dropped during compute, digest derived three ways with this
-repo's `verify.py` touched last. Roughly 6× apart in wall-clock and about 400 MB
-apart in peak memory, identical in output. Every solo memory and timing figure
-in this README is now presented as a measured range with its hosts named, since
-the previous single figure was host-specific — see "Cost: three measured hosts,
-one `vk.key`" above.
+**Reproduction across the two environments tested, which is the stronger
+result — stated at the scope it actually supports.** The two reproductions
+ran on different architectures by different paths and produced the same
+digest: Apple Silicon / Python 3.13.6, a **single-run observation**
+(wall-clock/memory only, ≈3.13s and ≈1.37 GB peak — that reproducer's script
+deletes the generated `vk.key` on exit, so no file size was retained or
+reported and none is claimed for that run), and a 2-core x86 cloud VM /
+Python 3.13.15 at ≈14.5s and ≈957 MB peak, network namespace dropped during
+compute, digest derived three ways with this repo's `verify.py` touched
+last, signed, and retaining a **157,511-byte** `vk.key` matching this repo's
+own build byte for byte. Roughly 6× apart in wall-clock and about 400 MB
+apart in peak memory between the two, identical in digest regardless — that
+is reproduction across the environments actually tested, not a general
+guarantee that the digest is architecture-independent everywhere; two
+single-run data points don't establish a universal property. Every solo
+memory and timing figure in this README is now presented as a measured
+range with its hosts named and scoped to those hosts, since the previous
+single figure was host-specific — see "Cost: three measured hosts, one
+`vk.key`" above.
 
 **The on-chain count did not move, and is not reported as though it did.** A
 live run of `verify_onchain_quorum.py` on 2026-09-14 still returns
@@ -1263,6 +1312,63 @@ exercised the container. See "Docker verification status" above for what would
 close it: wall-clock and peak *container* memory for each circuit, plus
 confirmation that each run lands on its canonical digest. One of the `005`
 reproducers has offered to run it on a throwaway host.
+
+## What changed — 2026-09-15
+
+**The Docker path is closed.** A reproducer ran both circuits through the
+content-pinned image (commit `dba5a975`) on a disposable 4 vCPU / 15 GiB x86
+host, Ubuntu 24.04, Docker 29.1.3, cgroup v2, reading memory as the
+container's own `memory.peak` rather than host RSS: solo at 9.07s / 1.43
+GiB, batch at 72.20s / 11.05 GiB, both exiting 0 with every pinned input
+digest checked and each circuit landing on its canonical `keccak256` — see
+"Docker verification status" above for the full record. **The previous ~8 GB
+estimate for batch was wrong, not just imprecise:** batch's actual peak is
+~11.05 GiB, above the 10 GiB gate a previous reproducer's run had terminated
+against with the cause recorded as unproven at the time — this measurement
+supplies that explanation. Provision at least ~12 GiB for batch; solo's
+figures were already accurate. Two scope notes are carried forward
+deliberately: the host was x86, so `arm64`-to-`amd64` emulation remains
+unmeasured, and no `--memory` cap was imposed, so these are usage figures,
+not behavior-under-a-cap figures.
+
+**Corrections to how the unsigned solo reproduction is described.** At the
+unsigned reproducer's request, three corrections are applied everywhere the
+cross-host comparison appears (the "Cost: three measured hosts" section,
+"Solo — published, and now independently reproduced," the "Independent
+Reproductions" summary, and the 2026-09-14 entry above): (1) their figures
+are now labeled a single-run observation, not a resource requirement and not
+a controlled cross-host benchmark; (2) the 157,511-byte `vk.key` size is no
+longer attributed to their run — their script deletes the generated key on
+exit, so they never retained or reported its size, and that figure now
+traces only to this repo's own build and to `005`'s signed reproduction;
+(3) the combined two-run result is now described as reproduction across the
+environments actually tested, not as a general guarantee of
+cross-architecture determinism — two single-run data points don't establish
+a universal property, and the previous "demonstrated, not asserted" wording
+overreached past what two runs support. Their confirmed digest match is
+unaffected by any of the three corrections.
+
+**`verify_onchain_quorum.py` had the same content-check gap the private
+client's `passportV2.ts` was just fixed for, and it mattered more here: this
+script is what independent reviewers are actually handed, and at least one
+has already run it.** `content_check_repro` read the reproduced digest from
+the document root only; `content_check_bytecode` right beside it already had
+a `payload` fallback, added when `004` (the first envelope-shaped record)
+was filed under that tag — but `pp-repro-v2`'s three prior records (`001`-
+`003`) all predate the envelope shape, so nothing had ever exercised that
+tag against it until `005` was filed on-chain. Left as it was, anyone running
+this script for solo would see `tier1Count = 0` while the chain itself
+resolves the record with a valid signature — the script would be
+contradicting the deployment it exists to check, not just under-reporting
+it. Fixed the same way as the client: one shape-agnostic `doc_field(doc,
+path)` accessor, tried by `content_check_repro` and `content_check_bytecode`
+alike, so a third tag or shape needs only its own field path. Re-run live
+against the public stack, both circuits, this same day: **solo now reports
+`tier1Count = 1, avgScore = 100, allowed = True`** (`005`/nsgoods verified,
+the other two candidates correctly `not_resolved_onchain`); batch is
+unchanged at `tier1Count = 3, avgScore = 100, allowed = True`, all three
+`pp-repro-v2` records and `004`'s `pp-bytecode-v1` record still verifying
+exactly as before.
 
 ## Scope
 
