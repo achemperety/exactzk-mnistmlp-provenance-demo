@@ -1049,6 +1049,26 @@ records' authority check needs — if that endpoint is ever down or altered,
 the affected record's authority check fails closed, the same way a bad
 signature would, rather than silently passing.
 
+[`verify_doc_field_regressions.py`](verify_doc_field_regressions.py) checks
+the field-reading logic underneath the script above, independently of any
+live chain state:
+
+```bash
+python3 verify_doc_field_regressions.py
+```
+
+No extra dependencies — it imports `verify_onchain_quorum.py` directly and
+otherwise uses only the Python standard library and this repo's own
+`attestations/*.json` files. It protects against the shape-agnostic
+`doc_field()` accessor's root/payload fallback being silently reintroduced:
+an attestation document's EIP-191 signature covers its `payload` only, so a
+version of `doc_field()` that falls back to reading an unsigned root-level
+copy of a field can be satisfied by content nobody actually signed. This
+script's `CASE_ROOT_ONLY_FORGERY_REJECTED` case constructs exactly that
+document and asserts it is refused, alongside the rest of the matrix
+(missing/malformed/conflicting fields, both document shapes, an unrecognized
+shape, and all five real attestation files).
+
 ### What this establishes, and what it does not
 
 The chain this whole repo is about is **artifacts → `vk.key` → compiled
