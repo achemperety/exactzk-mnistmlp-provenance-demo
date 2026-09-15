@@ -506,51 +506,120 @@ def check_circuit(w3, escrow, anchor, registry, chain_id, circuit_label, verifie
 # Attestation documents exist in two shapes: flat (001-003 -- the field sits
 # at the document root) and EIP-191 payload envelope (004, 005 -- the field
 # sits one level down, under doc["payload"], beside signature/signed_by).
-# doc_field() is the one place every content check reads through, instead of
-# each check hardcoding its own doc.get("payload", doc)-style fallback.
+# doc_field() is the one place every content check reads through.
 #
-# Before this: content_check_bytecode already had a payload fallback (added
-# when 004, the first envelope-shaped record, was filed under that tag);
-# content_check_repro did not, because its three prior records (001-003) all
-# predate the envelope shape -- nothing had ever exercised a pp-repro-v2
-# record in envelope shape until 005. That gap meant this script reported
-# tier1Count=0 for solo even after 005 was filed on-chain and resolved
-# correctly: the requestHash resolved, the signature verified, and the
-# content check still failed closed because it only ever looked at the
-# document root. Routing both checks through one accessor means a third tag
-# introduced in either shape only has to name its field path, not re-derive
-# the shape fallback -- the same fix already made in this project's
-# TypeScript client (client/src/passportV2.ts, docField()).
+# Hardened after a reviewer asked what happens when a root field and a
+# payload field both resolve and disagree. The first version of this
+# accessor (which fixed the 005 filing bug) read payload first and fell back
+# to the document root whenever the payload read came back None -- not only
+# when doc["payload"] itself was absent. For an envelope-shaped document only
+# `payload` is covered by the EIP-191 signature; the root sits outside the
+# signed material. That meant a validly-signed document could omit a field
+# from payload and carry an attacker-controlled copy of that same field at
+# the root, and the old accessor would silently return the unsigned root
+# value as verified content. A reader that can ever be satisfied by an
+# unsigned field is worse than the shape-specific reader it replaced.
+#
+# The rule this version enforces:
+#   - shape is decided by whether "payload" is a key on the document at all
+#     (and is itself a dict), not by whether the target field resolves.
+#   - envelope shape: read payload ONLY. Root is never a fallback value
+#     source -- it is only inspected to detect a conflict.
+#   - flat shape (no payload key): read root only.
+#   - both payload and root resolve the path in an envelope document:
+#     CONFLICT, not a precedence question, even if the two values agree --
+#     the root copy is unsigned regardless, so its mere presence is treated
+#     as the anomaly.
+#   - field missing, or present but not a non-empty string: unverifiable.
+#   - doc isn't a dict, or doc["payload"] is present but not itself a dict:
+#     unrecognized shape, unverifiable -- this reader fails closed on
+#     anything it doesn't know rather than guessing.
+#
+# Returns (status, value_or_None, detail_or_None) where status is one of
+# "ok", "missing", "malformed", "conflict", "unrecognized_shape". Same rule,
+# same shape taxonomy, as this project's TypeScript client
+# (client/src/passportV2.ts, docField()/DocFieldResult).
 def doc_field(doc, path):
+    path_label = ".".join(path)
+
     def walk(root):
         cur = root
         for key in path:
-            if not isinstance(cur, dict):
-                return None
-            cur = cur.get(key)
-        return cur
+            if not isinstance(cur, dict) or key not in cur:
+                return False, None
+            cur = cur[key]
+        return True, cur
 
-    payload = doc.get("payload") if isinstance(doc, dict) else None
-    if payload is not None:
-        val = walk(payload)
-        if val is not None:
-            return val
-    return walk(doc)
+    def classify(value, label):
+        if isinstance(value, str) and len(value) > 0:
+            return "ok", value, None
+        return "malformed", None, f"{label} is present but not a non-empty string (got {value!r})"
+
+    if not isinstance(doc, dict):
+        return "unrecognized_shape", None, "document is not a dict"
+
+    has_payload_key = "payload" in doc
+    if not has_payload_key:
+        present, value = walk(doc)
+        if not present:
+            return "missing", None, f"flat document has no {path_label}"
+        return classify(value, path_label)
+
+    payload = doc["payload"]
+    if not isinstance(payload, dict):
+        return "unrecognized_shape", None, "document has a payload key that is not itself a dict - not a recognized shape"
+
+    payload_present, payload_value = walk(payload)
+    root_present, root_value = walk(doc)
+
+    if payload_present and root_present:
+        return (
+            "conflict", None,
+            f"{path_label} is present both under payload ({payload_value!r}) and at the document root "
+            f"({root_value!r}) of an envelope-shaped document - only payload is covered by the signature, "
+            f"so the root copy is unsigned and this is refused rather than trusted either way",
+        )
+
+    if not payload_present:
+        return "missing", None, f"envelope-shaped document has no payload.{path_label} (a root-level {path_label}, if present, is unsigned and is not read)"
+
+    return classify(payload_value, f"payload.{path_label}")
+
+
+def doc_field_any(doc, paths):
+    """Tries each candidate field-name path in order (pp-repro-v2's two known
+    field names for the same content: reproducedDigests, computed_vk_digest).
+    A "missing" result moves on to the next candidate; malformed/conflict/
+    unrecognized_shape are hard failures and stop immediately rather than
+    being papered over by trying the next name."""
+    last_missing = None
+    for path in paths:
+        status, value, detail = doc_field(doc, path)
+        if status == "ok":
+            return status, value, detail
+        if status != "missing":
+            return status, value, detail
+        last_missing = (status, value, detail)
+    return last_missing if last_missing is not None else ("missing", None, "no field paths provided")
 
 
 def content_check_repro(doc, expected_vk_hash_file):
-    claimed = doc_field(doc, ["reproducedDigests", "keccak256"]) or doc_field(doc, ["computed_vk_digest", "keccak256"])
-    if not claimed:
-        return False, "document has neither reproducedDigests.keccak256 nor computed_vk_digest.keccak256"
+    status, claimed, detail = doc_field_any(doc, [["reproducedDigests", "keccak256"], ["computed_vk_digest", "keccak256"]])
+    if status != "ok":
+        return False, f"reproduced digest: {status} - {detail}"
     ok = claimed.lower().replace("0x", "") == expected_vk_hash_file.hex().lower()
     return ok, None if ok else f"document claims vk digest {claimed}, expected 0x{expected_vk_hash_file.hex()}"
 
 
 def content_check_bytecode(doc, expected_vk_hash_file, expected_vk_hash_bytecode):
-    claimed_file = doc_field(doc, ["vkHash_file"])
-    claimed_bytecode = doc_field(doc, ["vkHash_bytecode"])
-    file_ok = bool(claimed_file) and claimed_file.lower().replace("0x", "") == expected_vk_hash_file.hex().lower()
-    bc_ok = bool(claimed_bytecode) and claimed_bytecode.lower().replace("0x", "") == expected_vk_hash_bytecode.hex().lower()
+    file_status, claimed_file, file_detail = doc_field(doc, ["vkHash_file"])
+    if file_status != "ok":
+        return False, f"vkHash_file: {file_status} - {file_detail}"
+    bc_status, claimed_bytecode, bc_detail = doc_field(doc, ["vkHash_bytecode"])
+    if bc_status != "ok":
+        return False, f"vkHash_bytecode: {bc_status} - {bc_detail}"
+    file_ok = claimed_file.lower().replace("0x", "") == expected_vk_hash_file.hex().lower()
+    bc_ok = claimed_bytecode.lower().replace("0x", "") == expected_vk_hash_bytecode.hex().lower()
     if not (file_ok and bc_ok):
         return False, f"document claims vkHash_file={claimed_file} vkHash_bytecode={claimed_bytecode}"
     return True, None

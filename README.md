@@ -243,12 +243,13 @@ usage differs by roughly 8×, and applying batch's number to a solo run
 wastes most of a container's memory allowance; applying solo's number to a
 batch run OOM-kills it. **Batch needs meaningfully more than the ~8 GB this
 section previously estimated** — see "Docker verification status" below:
-measured peak is ~11.05 GiB, so an 8 GiB or 10 GiB `--memory` cap will
-OOM-kill `setup()`.
+measured peak is ~11.05 GiB, so an 8 GiB or 10 GiB `--memory` cap sits below
+what `setup()` actually touches and would be expected to OOM-kill it (inferred
+from the usage figure, not itself measured under a cap).
 
 | Circuit | Container memory (measured) |
 |---|---|
-| batch (default) | **~11.05 GiB** peak (cgroup v2 `memory.peak` of the container's own scope; no memory limit was imposed on the run — this is measured usage, not behavior under a cap). Provision at least ~12 GiB; an 8 GiB or 10 GiB limit will OOM-kill `setup()` — see below for a run that did exactly that. |
+| batch (default) | **~11.05 GiB** peak (cgroup v2 `memory.peak` of the container's own scope; no memory limit was imposed on the run — this is measured usage, not behavior under a cap). Provision at least ~12 GiB; an 8 GiB or 10 GiB limit sits below that peak and would be expected to OOM-kill `setup()` — see below for a plausible, unconfirmed connection to an earlier run that failed near that range. |
 | solo (`--circuit solo`) | **~1.43 GiB** peak (same measurement basis). |
 
 ### Docker verification status
@@ -288,17 +289,21 @@ exactly.
   under-a-cap measurement.
 
 **The 8 GB estimate this section previously carried was wrong, not just
-imprecise — this measurement is the explanation for an earlier failure, not
-merely an update to a number.** A previous reproducer's container run
-terminated against a 10 GiB memory gate, with the cause at the time recorded
-as unproven. Batch's actual peak — 11.05 GiB — is above that gate: an 8 GiB
-*or* a 10 GiB `--memory` limit both sit below what `setup()` needs, so
-either one OOM-kills batch's run partway through `setup()`. That is not a
-rounding error against the old ~8 GB estimate; it is a ~38% understatement
-that would leave anyone provisioning to the old number's guidance genuinely
-unable to complete a batch reproduction in Docker. Provision at least ~12
-GiB for batch; solo's ~1.43 GiB measured peak leaves the old ~2 GB estimate
-intact with headroom to spare.
+imprecise.** A previous reproducer's container run terminated against a 10
+GiB memory gate, with the cause at the time recorded as unproven. Batch's
+actual peak — 11.05 GiB — is above that gate, so an 8 GiB *or* a 10 GiB
+`--memory` limit sitting below what `setup()` actually needs is a **plausible
+cause consistent with that earlier failure** — not a confirmed one. This
+measurement has not reproduced the failure itself: no run in this section was
+made under a comparable memory cap, so what's established is that a cap in
+that range is *large enough to explain* the earlier termination, not that it
+*did* cause it; some other cause on that earlier host cannot be ruled out from
+this data alone. Independent of that open question, the 8 GB estimate itself
+is still wrong by a wide margin — a ~38% understatement against the measured
+peak — that would leave anyone provisioning to the old number's guidance
+genuinely unable to complete a batch reproduction in Docker. Provision at
+least ~12 GiB for batch; solo's ~1.43 GiB measured peak leaves the old ~2 GB
+estimate intact with headroom to spare.
 
 **The two native solo reproductions of 2026-09-13 did not close this item on
 their own** — see "Solo — published, and now independently reproduced"
@@ -1324,9 +1329,12 @@ digest checked and each circuit landing on its canonical `keccak256` — see
 "Docker verification status" above for the full record. **The previous ~8 GB
 estimate for batch was wrong, not just imprecise:** batch's actual peak is
 ~11.05 GiB, above the 10 GiB gate a previous reproducer's run had terminated
-against with the cause recorded as unproven at the time — this measurement
-supplies that explanation. Provision at least ~12 GiB for batch; solo's
-figures were already accurate. Two scope notes are carried forward
+against with the cause recorded as unproven at the time. That makes a
+memory cap in that range a **plausible cause consistent with** the earlier
+failure — this run was not made under a comparable cap, so it has not
+reproduced or confirmed that failure, only shown that its stated explanation
+remains open rather than ruled out. Provision at least ~12 GiB for batch;
+solo's figures were already accurate. Two scope notes are carried forward
 deliberately: the host was x86, so `arm64`-to-`amd64` emulation remains
 unmeasured, and no `--memory` cap was imposed, so these are usage figures,
 not behavior-under-a-cap figures.
@@ -1369,6 +1377,39 @@ the other two candidates correctly `not_resolved_onchain`); batch is
 unchanged at `tier1Count = 3, avgScore = 100, allowed = True`, all three
 `pp-repro-v2` records and `004`'s `pp-bytecode-v1` record still verifying
 exactly as before.
+
+**`doc_field()` hardened against a conflict the shape fallback had missed.**
+A reviewer asked what the accessor above does when a payload value and a
+root value both resolve and disagree — the answer was that it could be
+satisfied by the root one. The original `doc_field()` read `payload` first
+and fell back to the document root whenever the payload read came back
+`None`, not only when `doc["payload"]` itself was absent. In an
+envelope-shaped document, only `payload` is covered by the EIP-191
+signature; the root sits outside the signed material entirely. A document
+could therefore be validly signed, omit a field from `payload`, and carry an
+attacker-controlled copy of that field at the root, and the old accessor
+would return the unsigned root value as if it were verified content. Fixed
+so shape is decided by whether a `payload` key is present at all (not by
+whether the field happens to resolve): envelope-shaped documents read
+`payload` only, root is consulted solely to detect a conflict and never as a
+value source; a field present at both locations is refused as a conflict
+even when the two values agree, since the root copy is unsigned regardless;
+missing or malformed (present but not a non-empty string) fields are refused
+as unverifiable; and a document shape the reader doesn't recognize (not an
+object, or a `payload` key that isn't itself an object) fails closed rather
+than guessing. Same rule, applied identically, in both places this accessor
+exists: `client/src/passportV2.ts` (`docField()`/`docFieldAny()`) in the
+private repo, and `doc_field()`/`doc_field_any()` in this script. This
+repository has no test harness (no `tests/` directory, no `requirements.txt`,
+no pytest) — the fix was verified with a one-off regression script exercising
+every combination (both shapes, missing, malformed, agreeing conflict,
+disagreeing conflict, unrecognized shape) against synthetic documents plus
+all five real attestation files, run manually rather than checked in, and
+then confirmed with the live re-run above: `tier1Count` unchanged at 1
+(solo) and 3 (batch) after the hardening, since none of the five real
+attestation documents on record actually contain a root/payload conflict —
+the exploit case is currently only reachable by a maliciously constructed
+document, which is exactly the case this closes off.
 
 ## Scope
 
