@@ -901,7 +901,8 @@ across the two environments actually tested. See `attestations/` for all
 records; each file states its own circuit and tier, which is not inferable
 from the directory.
 
-The five files are digest-pinned in
+The eight files (`001`-`006`, plus `006a`/`006b`, the per-circuit split of
+`006` — see "What changed — 2026-09-17" below) are digest-pinned in
 [`attestations/MANIFEST.sha256`](attestations/MANIFEST.sha256) — same
 convenience-pointer status as the two bundle manifests above (`shasum -a 256 -c`
 detects accidental corruption, not a determined edit; the signatures inside the
@@ -909,7 +910,7 @@ files are the real integrity mechanism). That manifest's own bundle digest
 (`SHA256(attestations/MANIFEST.sha256)`):
 
 ```
-4ca9c1cd4a9387aae42a0d38d53ea6d7cebfd2961ef64733a75b1bfe322aa60e
+b6343757e895196af48b015cfadc88db9bbd240b986b2a352cac0fd818bba180
 ```
 
 ## The public mirror stack — a quorum check anyone can run against public chain state
@@ -1439,7 +1440,83 @@ attestation documents on record actually contain a root/payload conflict —
 the exploit case is currently only reachable by a maliciously constructed
 document, which is exactly the case this closes off.
 
-## Scope
+## What changed — 2026-09-17
+
+**`006a` and `006b` added — the per-circuit split of `006` requested
+previously.** `006` (2026-09-15) covered both circuits in one signed
+document, with each circuit's digest inside a `payload.runs[]` array
+selected by a `circuit` label — a shape neither this script's `doc_field()`
+nor the private client's `docField()` can resolve without widening the
+reader (see the 2026-09-15 entry above and `zkinference-escrow`'s docs/58,
+§15, for why widening it was rejected). nsgoods split it into `006a` (solo
+only) and `006b` (batch only), each with `payload.computed_vk_digest`
+directly at the top of `payload` — the same scalar shape every prior record
+already uses. **`006` remains published here unchanged** — it is the record
+of what was originally signed, and both split files name it as a companion
+in their own `notes` field; splitting created two additional signed
+documents, it did not retract or replace the first one.
+
+Each was verified independently of `006` and of each other, not by carrying
+over `006`'s already-completed checks: `006a`'s and `006b`'s
+`computed_vk_digest.keccak256` were recomputed live from this repo's own
+`vk.key` files (`circuits/spike-mlp/run_t3_k5_nonces/vk.key` and
+`run_mnist_mw_k8/vk.key` in the private project) and matched; the real
+RFC8785/JCS canonicalization of each `payload` (via the `jcs` PyPI package,
+not the `json.dumps` stand-in) reproduced each file's declared `jcs_sha256`
+and `jcs_len` exactly; EIP-191 `personal_sign` recovery over that
+canonicalization recovered `0x57fF0F084Cba33e6761503f90eEF0Da9F159350c` for
+both, matching `signed_by`; four deliberately wrong constructions (whole-document
+canonicalization, no EIP-191 prefix, a malformed signable-message version
+byte, and plain unsorted `json.dumps`) each recovered a different, distinct,
+wrong address for both files, confirming the declared scheme is exactly the
+construction that works. The live `https://x402.nsgoods.org/proof/index.json`
+manifest (`generated_at = 2026-09-16T17:14:04Z`) lists both new files as
+separate `reproduction_attestations` entries with `jcs_sha256` values
+matching what was computed independently above (not copied from the
+manifest), and confirms the signer's scope still includes
+`reproduction-attestations`. The attester's own claim that the values match
+`006` byte-for-byte was checked, not assumed: `006a`'s digests, host block,
+`exit_code`, `wall_s` (9.07), and `peak_container_mem_gib` (1.426) are
+identical to `006`'s `runs[0]` (solo); `006b`'s are identical to `006`'s
+`runs[1]` (batch) including the 11.052 GiB batch peak — true in both cases.
+
+**The reader resolves both cleanly — the shape gap that blocked `006` is
+specifically what the split fixes.** `doc_field(doc, ["computed_vk_digest",
+"keccak256"])` against both `006a` and `006b` returns `("ok", <digest>,
+None)` and `content_check_repro` passes for both against this repo's own
+`vkHashFileSolo`/`vkHashFileBatch` — confirmed directly, not inferred from
+the shape matching by inspection alone.
+
+**Filed on-chain against the public mirror stack** (Base Sepolia, chainId
+84532, mirror key, tag `pp-repro-docker-v1`, attester nsgoods inside each
+`requestHash` preimage, filer ≠ attester throughout — same construction as
+every prior filing): `006a` against the solo circuit, `006b` against the
+batch circuit, one `validationRequest`/`validationResponse` pair each. Real
+receipts: 262,132 + 218,024 gas (`006a`) and 262,144 + 218,024 gas (`006b`),
+960,324 gas total, ≈0.0000058 ETH at this session's 0.006 gwei gas price.
+Both resolved on the expected Base Sepolia read-after-write retry (first
+read-back `lastUpdate=0`, same documented propagation lag as `005`'s
+filing; resolved cleanly ~3s later with `response=100` and the correct
+`responseURI` for both). Full detail, transaction hashes, and the
+`responseURI`-resolution caveat (the on-chain URI points at this repo's
+raw-GitHub copy, which is not live until this file is committed and pushed)
+are recorded in the private project's `docs/58`, not duplicated here.
+
+**The tag does not move `tier1Count` on either circuit, and this was
+expected, not a bug.** `pp-repro-docker-v1` is not one of the three tags
+this script's `check_circuit()` (or the private client's
+`checkPassportPolicyV2`) dispatches to a content check —
+`TAG_REPRO`/`pp-repro-v2`, `TAG_BYTECODE`/`pp-bytecode-v1`, and
+`same-weights-v1` are the only three either checker recognizes. Confirmed
+empirically, not just by reading the tag list: re-running this script and
+the private client's shipped `e2e_passport_v2_driver.ts` against the public
+mirror stack after filing shows solo unchanged at `tier1Count=1` (`005`
+only) and batch unchanged at `tier1Count=3` (`001`-`003`) — identical to
+before this filing, since neither checker ever attempts a
+`pp-repro-docker-v1` lookup for any attester. The two new records are
+resolvable on-chain, byte-for-byte-consistent with what nsgoods signed, and
+currently invisible to the quorum policy simultaneously — those are not in
+tension; the quorum policy only knows three tags today.
 
 This bundle only proves circuit-provenance reproducibility (same
 inputs → same VK). It is not the full escrow contract, not the proving
