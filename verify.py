@@ -8,12 +8,15 @@ Usage:
     python3 verify.py                  # batch (default, backward-compatible)
     python3 verify.py --circuit batch
     python3 verify.py --circuit solo
+    python3 verify.py --no-environment # omit the "environment" record from
+                                        # the suggested attestation JSON
 """
 import argparse
 import hashlib
 import json
 import sys
 import tempfile
+import time
 import os
 
 import ezkl
@@ -67,10 +70,130 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def collect_environment(ezkl_version: str, t_start: float, setup_wall_s: float) -> dict:
+    """Best-effort, cross-platform-comparable record of the environment this
+    reproduction ran in: peak RSS (bytes, normalized), OS/arch, container
+    detection, and timings. Must never raise and must never affect verify.py's
+    own exit code -- any failure here degrades to {"schema": ..., "error": ...}
+    and the reproduction proceeds exactly as if this had not been called.
+
+    Memory: resource.getrusage(RUSAGE_SELF).ru_maxrss is peak RSS of THIS
+    process since it started. verify.py calls ezkl in-process and spawns no
+    subprocesses of its own, so this one figure covers the entire
+    reproduction (unlike verify_deployment.py, which also shells out to
+    anvil). The unit convention differs by platform -- bytes on Darwin,
+    kibibytes on Linux -- so both the raw value and its unit are reported
+    alongside the normalized byte count, never the normalized value alone.
+    ru_maxrss is resident set size and excludes page cache, so it is not
+    directly comparable to a cgroup v2 memory.peak figure (which includes
+    page cache, as used by this repo's existing third-party Docker
+    attestations, e.g. attestations/006a-nsgoods-2026-09-15.json) -- the gap
+    between the two bases widens for circuits that write a large proving key.
+
+    Container detection: only checked on non-Darwin platforms, since none of
+    the marker paths exist natively on macOS -- a negative result there would
+    be "not checked", not "confirmed not a container", so Darwin reports
+    null rather than false.
+    """
+    schema = "exactzk-env-record-v1"
+    try:
+        import datetime
+        import platform
+        import resource
+
+        system = platform.system()
+
+        raw_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if system == "Darwin":
+            peak_rss_bytes = raw_rss
+            peak_rss_raw_unit = "bytes"
+        elif system == "Linux":
+            peak_rss_bytes = raw_rss * 1024
+            peak_rss_raw_unit = "kibibytes"
+        else:
+            peak_rss_bytes = None
+            peak_rss_raw_unit = "unknown"
+        peak_rss_gib = round(peak_rss_bytes / 1024 ** 3, 3) if peak_rss_bytes is not None else None
+
+        if system == "Darwin":
+            container_detected, container_basis = None, "not determinable on this platform"
+        else:
+            container_detected, container_basis = False, (
+                "no container indicators found (checked /.dockerenv, "
+                "/run/.containerenv, /proc/1/cgroup)"
+            )
+            if os.path.exists("/.dockerenv"):
+                container_detected, container_basis = True, "/.dockerenv present"
+            elif os.path.exists("/run/.containerenv"):
+                container_detected, container_basis = True, "/run/.containerenv present (podman)"
+            else:
+                try:
+                    with open("/proc/1/cgroup") as f:
+                        cgroup_text = f.read()
+                    if any(tok in cgroup_text for tok in ("docker", "kubepods", "containerd", "lxc")):
+                        container_detected, container_basis = True, "container indicator found in /proc/1/cgroup"
+                except OSError:
+                    pass
+
+        if peak_rss_raw_unit == "bytes":
+            unit_note = "ru_maxrss was used directly as bytes"
+        elif peak_rss_raw_unit == "kibibytes":
+            unit_note = "ru_maxrss was multiplied by 1024 to normalize to bytes"
+        else:
+            unit_note = "ru_maxrss's unit convention on this platform is unknown, so it was left unconverted (peak_rss_bytes is null)"
+
+        measurement_basis = (
+            f"peak_rss_* is resource.getrusage(RUSAGE_SELF).ru_maxrss of the verify.py "
+            f"process itself, sampled once after setup() completes; verify.py spawns no "
+            f"subprocesses of its own, so this figure covers the entire reproduction. "
+            f"On this platform ({system}), ru_maxrss is reported in {peak_rss_raw_unit}; {unit_note}. "
+            f"ru_maxrss measures resident set size and does not include page cache, so it is "
+            f"not directly comparable to a cgroup v2 memory.peak figure measured around "
+            f"`docker run` (which does include page cache, as reported by this repo's "
+            f"existing third-party Docker attestations under attestations/, e.g. 006a); the "
+            f"gap between the two bases widens for circuits that write a large proving key, "
+            f"since page cache from that write can inflate memory.peak without showing up in RSS."
+        )
+
+        return {
+            "schema": schema,
+            "measured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "os": f"{system} {platform.release()}",
+            "arch": platform.machine(),
+            "python": platform.python_version(),
+            "ezkl_version": ezkl_version,
+            "container_detected": container_detected,
+            "container_basis": container_basis,
+            "peak_rss_bytes": peak_rss_bytes,
+            "peak_rss_raw": raw_rss,
+            "peak_rss_raw_unit": peak_rss_raw_unit,
+            "peak_rss_source": "getrusage.ru_maxrss.RUSAGE_SELF",
+            "peak_rss_gib": peak_rss_gib,
+            "wall_s": round(time.monotonic() - t_start, 2),
+            "setup_wall_s": setup_wall_s,
+            "measurement_basis": measurement_basis,
+        }
+    except Exception as e:
+        # Exception CLASS NAME only -- no str(e). A real failure here is
+        # typically an OSError whose message embeds an absolute path (e.g.
+        # "Permission denied: '/Users/<username>/...'"), and this record can
+        # end up signed and published by a third-party reproducer (B3: no
+        # paths, usernames, or other host-identifying data). The class name
+        # alone (PermissionError, FileNotFoundError, ...) is enough to tell a
+        # maintainer where to start asking, without risking exactly the kind
+        # of data this function exists to keep out.
+        return {"schema": schema, "error_class": type(e).__name__}
+
+
 def main() -> int:
+    t_start = time.monotonic()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--circuit", choices=sorted(CIRCUITS), default="batch",
                          help="which circuit's bundle to reproduce (default: batch)")
+    parser.add_argument("--no-environment", action="store_true",
+                         help="omit the 'environment' record (peak RSS, OS/arch, "
+                              "container detection, timings) from the suggested "
+                              "attestation JSON; included by default")
     args = parser.parse_args()
     cfg = CIRCUITS[args.circuit]
 
@@ -105,6 +228,7 @@ def main() -> int:
         vk_path = os.path.join(tmp, "vk.key")
         pk_path = os.path.join(tmp, "pk.key")
 
+        t_setup_start = time.monotonic()
         print("compile_circuit ...")
         ezkl.compile_circuit(onnx_path, compiled_path, settings_path)
 
@@ -112,6 +236,7 @@ def main() -> int:
               "roughly 15-100s; solo: allocates ~1.5 GB RSS, roughly 2s "
               "-- depends on host either way) ...")
         ezkl.setup(compiled_path, vk_path, pk_path, srs_path)
+        setup_wall_s = round(time.monotonic() - t_setup_start, 2)
 
         vk_bytes = open(vk_path, "rb").read()
         vk_sha256 = hashlib.sha256(vk_bytes).hexdigest()
@@ -144,6 +269,8 @@ def main() -> int:
         "matches_expected_digest": ok,
         "notes": "",
     }
+    if not args.no_environment:
+        attestation["environment"] = collect_environment(ezkl.__version__, t_start, setup_wall_s)
     import datetime
     attestation["date"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
