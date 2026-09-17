@@ -1522,3 +1522,81 @@ This bundle only proves circuit-provenance reproducibility (same
 inputs → same VK). It is not the full escrow contract, not the proving
 pipeline benchmarks, and not the passport/attestation contract code — those
 live in the private project this was extracted from.
+
+## What changed — 2026-09-18
+
+**`verify.py` now emits a structured environment record.** The suggested
+attestation JSON gained an `environment` object: OS, architecture, Python
+version, container detection, wall-clock, setup wall-clock, and peak RSS.
+Third-party reproductions previously reported their environment in free-form
+prose or in per-attester JSON shapes, so figures were not comparable between
+reproducers. The record is printed, never written to disk — `verify.py` still
+leaves no persistent artifact — and it reaches an integrity mechanism only by
+being signed inside the reproducer's own attestation payload, consistent with
+this repo's standing rule that the signature, not the manifest, is what
+guarantees such values. Collection is fail-open and cannot change the exit
+code; on failure the record carries the exception class name and never its
+message, because a real failure here is typically an `OSError` whose text
+embeds an absolute path. `--no-environment` omits the record entirely.
+
+**Batch peak RSS measured natively: 7.751 GiB.** Run on Apple Silicon
+(Darwin 25.3.0, arm64, Python 3.13.6, 24 GiB RAM), exit 0, canonical digest
+matched. `ru_maxrss` = 8,322,957,312 bytes = 7.751 GiB; `/usr/bin/time -l`
+reported the identical byte value. The agreement is exact because both read
+the same `getrusage(RUSAGE_SELF)` of the same process, so it cross-checks the
+platform's unit convention (bytes on Darwin) and this repo's arithmetic — it
+does not independently re-measure ezkl. Wall-clock 15.17s, of which setup
+15.08s; `user` 77.52s against `real` 15.36s, i.e. setup is heavily threaded.
+The machine did not swap: `vm.swapusage` was unchanged across the run and
+`/usr/bin/time -l` reported 0 swaps, so this figure is not depressed by
+memory pressure.
+
+**The two memory figures in this README are different quantities, not a
+contradiction, and this was not stated before.** `~7–8 GB peak RSS` (the
+native figure, quoted in the tier table, the reproduce table, and the
+`verify_deployment.py` section) is resident set size and excludes page cache.
+`11.05 GiB` (the Docker figure) is cgroup v2 `memory.peak`, which includes
+page cache — and batch's `setup()` writes a ~5.2 GB `pk.key`, whose pages are
+accounted there. Today's measurement confirms the native figure: 7.751 GiB
+resident. It does not revise the container figure, and the guidance in
+"Docker verification status" is unchanged — a `--memory` cap is enforced
+against cgroup accounting, so **provision at least ~12 GiB for a batch run in
+a container**, while a native batch run needs roughly 8 GiB resident.
+Suggestive but not proof: the same Darwin run's `peak memory footprint`
+(a macOS-specific metric that accounts for more than plain RSS) was 10.83 GiB,
+within ~2% of the 11.05 GiB measured under cgroup v2 on Linux/x86_64. Two
+different metrics on two different platforms landing close together is
+consistent with the page-cache explanation; it does not establish it.
+
+**Correcting a figure in "Docker verification status."** That section calls
+the old 8 GB estimate "a ~38% understatement against the measured peak."
+Stated against the measured peak, the understatement is ~28% (3.05 of 11.05);
+~38% is the same gap expressed against the old estimate (3.05 of 8), i.e. the
+peak is ~38% above 8. Both are arithmetically fine; the sentence named the
+wrong denominator for the wording it used.
+
+**What this adds to the open 10 GiB question, and what it does not.** A
+previous reproducer's container run terminated against a 10 GiB memory gate,
+with the cause recorded here as plausible but unconfirmed. Native resident
+memory for batch is 7.751 GiB — *below* that gate — so resident usage alone
+does not explain a termination at 10 GiB, while cgroup accounting that
+includes the proving key's page cache does reach past it. That sharpens the
+existing explanation rather than replacing it. It remains unconfirmed: no run
+in this repo has been made under a comparable memory cap, and this
+measurement was native, not containerised.
+
+**Two commit messages in this repo quote check counts that do not match the
+committed tree.** `7ea1901` states "16 of 33" and "33 of 33"; `7a695f8`
+states "17 failures of 35" and "35 of 35". Measured from clean local clones at
+those exact revisions, `verify_doc_field_regressions.py` contains 36 and 38
+checks respectively, all passing. The quoted figures correspond to no
+committed state; they came from uncommitted working-tree experiments that
+reverted the content reader by hand, and that code was never committed, so
+the failure counts cannot be reproduced exactly. Reconstructing a
+payload-else-root fallback against the current reader today yields 7 failures
+of 38, failing precisely on the envelope conflict cases and on both root-only
+forgery cases — including the one carrying a genuinely valid signature. The
+substance of what those messages claimed — the fallback accessor accepts an
+unsigned root-level field, the hardened one refuses it — is confirmed; the
+numbers are not. Note also that the hardening itself landed in `4b4bcf9`;
+`7a695f8` did not modify `verify_onchain_quorum.py`.
