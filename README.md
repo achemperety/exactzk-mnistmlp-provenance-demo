@@ -241,15 +241,19 @@ The base image is `python:3.11-slim`, pinned by content digest.
 **Memory: scoped per circuit, not one blanket number.** The two circuits'
 usage differs by roughly 8×, and applying batch's number to a solo run
 wastes most of a container's memory allowance; applying solo's number to a
-batch run OOM-kills it. **Batch needs meaningfully more than the ~8 GB this
-section previously estimated** — see "Docker verification status" below:
-measured peak is ~11.05 GiB, so an 8 GiB or 10 GiB `--memory` cap sits below
-what `setup()` actually touches and would be expected to OOM-kill it (inferred
-from the usage figure, not itself measured under a cap).
+batch run OOM-kills it. **Batch's container figure is much larger than its native one, and they are
+different quantities.** The ~8 GB long documented here is peak RSS of a native
+run, measured at 7.751 GiB on 2026-09-18. The ~11.05 GiB below is cgroup v2
+`memory.peak` of a container, which also counts page cache, and batch's
+`setup()` writes a ~5.2 GB proving key. Provision at least ~12 GiB for a batch
+container: that is what an unconstrained run touched, so it is known to be
+sufficient. Whether a smaller cap also works is unmeasured — much of the
+page-cache component is reclaimable under pressure, so a cap between the two
+figures may or may not OOM-kill `setup()`.
 
 | Circuit | Container memory (measured) |
 |---|---|
-| batch (default) | **~11.05 GiB** peak (cgroup v2 `memory.peak` of the container's own scope; no memory limit was imposed on the run — this is measured usage, not behavior under a cap). Provision at least ~12 GiB; an 8 GiB or 10 GiB limit sits below that peak and would be expected to OOM-kill `setup()` — see below for a plausible, unconfirmed connection to an earlier run that failed near that range. |
+| batch (default) | **~11.05 GiB** peak (cgroup v2 `memory.peak` of the container's own scope; no memory limit was imposed on the run — this is measured usage, not behavior under a cap). Provision at least ~12 GiB. A native run's peak RSS is a different and smaller quantity — 7.751 GiB measured — see "Docker verification status" below. |
 | solo (`--circuit solo`) | **~1.43 GiB** peak (same measurement basis). |
 
 ### Docker verification status
@@ -284,26 +288,35 @@ exactly.
   usage**, not **behavior under a cap** — they say how much memory `setup()`
   actually touches when nothing constrains it, not what happens (graceful
   degradation vs. OOM-kill, timing under memory pressure) if a limit sits
-  below that peak. The paragraph below draws an inference from these usage
-  figures about one specific cap (10 GiB); it is not itself a second,
-  under-a-cap measurement.
+  below that peak. The paragraphs below reason from these usage figures about
+  an earlier failed run on another host; they are not themselves a second, under-a-cap
+  measurement.
 
-**The 8 GB estimate this section previously carried was wrong, not just
-imprecise.** A previous reproducer's container run terminated against a 10
-GiB memory gate, with the cause at the time recorded as unproven. Batch's
-actual peak — 11.05 GiB — is above that gate, so an 8 GiB *or* a 10 GiB
-`--memory` limit sitting below what `setup()` actually needs is a **plausible
-cause consistent with that earlier failure** — not a confirmed one. This
-measurement has not reproduced the failure itself: no run in this section was
-made under a comparable memory cap, so what's established is that a cap in
-that range is *large enough to explain* the earlier termination, not that it
-*did* cause it; some other cause on that earlier host cannot be ruled out from
-this data alone. Independent of that open question, the 8 GB estimate itself
-is still wrong by a wide margin — a ~38% understatement against the measured
-peak — that would leave anyone provisioning to the old number's guidance
-genuinely unable to complete a batch reproduction in Docker. Provision at
-least ~12 GiB for batch; solo's ~1.43 GiB measured peak leaves the old ~2 GB
-estimate intact with headroom to spare.
+**The ~8 GB figure was the wrong quantity for this section, not a wrong
+number.** ~8 GB is peak resident set size of a native run, and a native
+measurement on 2026-09-18 put it at 7.751 GiB — the old figure holds for what it
+measures. What it does not measure is a container, where a `--memory` cap is
+enforced against cgroup accounting that also counts page cache; batch's
+`setup()` writes a ~5.2 GB proving key, and the measured container peak is
+~11.05 GiB. Provisioning a Docker run to ~8 GB on the strength of the native
+number was guidance drawn from the wrong measurement basis, which is why this
+section now carries both figures with their bases named.
+
+**What this says about an earlier failed reproduction.** A previous reproducer's
+containerised batch run exited 137 on a local Docker engine exposing ~7.669
+GiB. No `--memory` cap was involved, and no memory threshold exists anywhere in
+this repository. Earlier revisions of this README described that run as having
+hit a "10 GiB gate"; that was an error — the number was the reproducer's own
+post-hoc safety margin, which they retracted in the same thread. The native peak
+measured on 2026-09-18, 7.751 GiB, is above the ~7.669 GiB that engine made
+available, by roughly 84 MiB, before counting anything else in the container and
+before page cache enters cgroup accounting. Memory exhaustion is therefore a
+concrete, measured candidate for that termination, where previously there was
+none. It is still not confirmed: exit 137 reports that a process was killed, not
+why; peak RSS on that host and CPU may differ from the host measured here; and
+no run has been made under comparable conditions. Provision at least ~12 GiB for
+batch; solo's ~1.43 GiB measured peak leaves the old ~2 GB estimate intact with
+headroom to spare.
 
 **The two native solo reproductions of 2026-09-13 did not close this item on
 their own** — see "Solo — published, and now independently reproduced"
@@ -1355,14 +1368,14 @@ host, Ubuntu 24.04, Docker 29.1.3, cgroup v2, reading memory as the
 container's own `memory.peak` rather than host RSS: solo at 9.07s / 1.43
 GiB, batch at 72.20s / 11.05 GiB, both exiting 0 with every pinned input
 digest checked and each circuit landing on its canonical `keccak256` — see
-"Docker verification status" above for the full record. **The previous ~8 GB
-estimate for batch was wrong, not just imprecise:** batch's actual peak is
-~11.05 GiB, above the 10 GiB gate a previous reproducer's run had terminated
-against with the cause recorded as unproven at the time. That makes a
-memory cap in that range a **plausible cause consistent with** the earlier
-failure — this run was not made under a comparable cap, so it has not
-reproduced or confirmed that failure, only shown that its stated explanation
-remains open rather than ruled out. Provision at least ~12 GiB for batch;
+"Docker verification status" above for the full record. **The ~8 GB figure this
+README carried for batch measures a native run, not a
+container:** batch's container peak is ~11.05 GiB by cgroup accounting, which
+also counts page cache. *(Corrected 2026-09-18: this entry originally called the
+~8 GB estimate wrong, and tied ~11.05 GiB to a "10 GiB gate" an earlier
+reproducer's run had terminated against. Both were mistaken — ~8 GB is accurate
+for native peak RSS, measured at 7.751 GiB, and no 10 GiB gate ever existed.
+See "What changed — 2026-09-18".)*. Provision at least ~12 GiB for batch;
 solo's figures were already accurate. Two scope notes are carried forward
 deliberately: the host was x86, so `arm64`-to-`amd64` emulation remains
 unmeasured, and no `--memory` cap was imposed, so these are usage figures,
@@ -1575,15 +1588,34 @@ Stated against the measured peak, the understatement is ~28% (3.05 of 11.05);
 peak is ~38% above 8. Both are arithmetically fine; the sentence named the
 wrong denominator for the wording it used.
 
-**What this adds to the open 10 GiB question, and what it does not.** A
-previous reproducer's container run terminated against a 10 GiB memory gate,
-with the cause recorded here as plausible but unconfirmed. Native resident
-memory for batch is 7.751 GiB — *below* that gate — so resident usage alone
-does not explain a termination at 10 GiB, while cgroup accounting that
-includes the proving key's page cache does reach past it. That sharpens the
-existing explanation rather than replacing it. It remains unconfirmed: no run
-in this repo has been made under a comparable memory cap, and this
-measurement was native, not containerised.
+**Corrections applied in place to "Docker verification status" and to the
+2026-09-15 entry.** Those sections described the ~8 GB batch figure as having
+been wrong, and attributed an earlier reproducer's failed container run to a
+"10 GiB memory gate". Both statements were mistaken and have been rewritten
+where they stand, rather than only noted here, since a reader meets them long
+before reaching this log. ~8 GB was never a wrong number — it is peak resident
+set size of a native run, now measured at 7.751 GiB. It was the wrong
+*quantity* to give as Docker provisioning guidance, where a cap is enforced
+against cgroup accounting that also counts page cache. And no 10 GiB gate ever
+existed, in this repository or in that run: the figure was the reproducer's own
+post-hoc safety margin, which they retracted in the original thread before this
+README adopted it. The sentence calling the old estimate "a ~38% understatement
+against the measured peak" is gone with the paragraph that carried it; for the
+record, that gap is ~28% stated against the measured peak and ~38% stated
+against the old estimate.
+
+**What the measurement says about that earlier failure.** The run exited 137 on
+a local Docker engine exposing ~7.669 GiB. Native peak RSS for batch is 7.751
+GiB — roughly 84 MiB above what that engine made available, before counting the
+container's other memory and before page cache enters cgroup accounting. That
+makes memory exhaustion a concrete candidate where the cause had been recorded
+as unproven with nothing measured pointing at it. It remains unconfirmed: exit
+137 says a process was killed, not why; peak RSS on that host and CPU may
+differ from the host measured here; and no run here has been made under
+comparable conditions. One caveat against over-reading the container figure:
+cgroup page cache is largely reclaimable under pressure, so an unconstrained
+peak of ~11.05 GiB does not establish that a cap below it must OOM-kill
+`setup()`.
 
 **Two commit messages in this repo quote check counts that do not match the
 committed tree.** `7ea1901` states "16 of 33" and "33 of 33"; `7a695f8`
